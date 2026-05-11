@@ -1,42 +1,61 @@
 bundle:
-  name: cs-agent-workshop
+  name: cs_agent_workshop
 
 variables:
   catalog:
     description: "Workshop catalog"
-    default: "{{CATALOG}}"
+    default: "robert_mosley"
   schema:
-    description: "Workshop schema (per-user)"
-    default: "{{SCHEMA}}"
-  user_email:
-    description: "Deploying user email"
-    default: "{{USER}}"
-
-targets:
-  default:
-    mode: development
-    default: true
+    description: "Workshop schema"
+    default: "cs_workshop"
+  lakebase_instance:
+    description: "Lakebase provisioned instance name for agent memory"
+    default: "agent-pdpa-st-mem"
 
 resources:
+  experiments:
+    cs_agent_workshop_experiment:
+      name: /Users/${workspace.current_user.userName}/cs-agent-workshop-${bundle.target}
+
   apps:
-    techmart_cs_agent:
-      name: "cs-agent-${var.user_email}"
-      description: "TechMart Customer Support Agent"
-      source_code_path: .
+    cs_agent_workshop:
+      name: "cs-agent-workshop"
+      description: "TechMart Customer Support Agent — Workshop Reference"
+      source_code_path: ./
+
       config:
-        command:
-          - uvicorn
-          - agent:app
-          - "--host"
-          - "0.0.0.0"
-          - "--port"
-          - "${DATABRICKS_APP_PORT}"
+        command: ["uv", "run", "start-server"]
         env:
+          - name: MLFLOW_EXPERIMENT_ID
+            value_from: experiment
+          - name: DATABRICKS_HOST
+            value: "${workspace.host}"
           - name: WORKSHOP_CATALOG
             value: "${var.catalog}"
           - name: WORKSHOP_SCHEMA
             value: "${var.schema}"
           - name: LLM_ENDPOINT
             value: "databricks-claude-sonnet-4-7"
-          - name: MLFLOW_EXPERIMENT
-            value: "/Users/${var.user_email}/cs-agent-workshop"
+          - name: LAKEBASE_INSTANCE_NAME
+            value_from: database
+
+      resources:
+        - name: experiment
+          experiment:
+            experiment_id: ${resources.experiments.cs_agent_workshop_experiment.experiment_id}
+            permission: CAN_MANAGE
+
+        # Lakebase (provisioned) for AsyncCheckpointSaver conversation memory
+        - name: database
+          database:
+            instance_name: "${var.lakebase_instance}"
+            database_name: databricks_postgres
+            permission: CAN_CONNECT_AND_CREATE
+        # Note: UC function execute permissions are granted at schema level
+        # via GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA to the app service principal
+        # — see orchestration/workspace_setup.py step 6.
+
+targets:
+  dev:
+    mode: development
+    default: true

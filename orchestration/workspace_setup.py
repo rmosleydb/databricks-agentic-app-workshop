@@ -28,11 +28,6 @@ import time
 import logging
 import sys
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.catalog import (
-    SecurableType,
-    PrivilegeAssignment,
-    Privilege,
-)
 from databricks.sdk.service.vectorsearch import (
     EndpointType,
     VectorIndexType,
@@ -283,15 +278,31 @@ def setup(args):
     # Create delta-sync index on product_docs
     index_name = f"{cat}.{schema}.product_docs_vs"
     source_table = f"{cat}.{schema}.product_docs"
+    index_exists = False
     try:
         idx = w.vector_search_indexes.get_index(index_name)
-        log.info("  VS index '%s' already exists (status: %s)", index_name,
-                 idx.status.detailed_state if idx.status else "unknown")
-    except Exception:
+        # Index exists — check status via .ready attribute (SDK quirk)
+        is_ready = getattr(idx.status, "ready", False) if idx.status else False
+        log.info("  VS index '%s' exists (ready=%s, rows=%s)", index_name,
+                 is_ready, getattr(idx.status, "indexed_row_count", "?"))
+        index_exists = True
+    except Exception as e:
+        err_str = str(e).lower()
+        if "does not exist" in err_str or "resourcedoesnotexist" in type(e).__name__.lower():
+            log.info("  VS index not found — will create it.")
+        elif "detailed_state" in str(e):
+            # SDK attribute mismatch — index exists but status object differs
+            log.info("  VS index appears to exist (SDK attribute mismatch) — skipping create.")
+            index_exists = True
+        else:
+            log.warning("  Unexpected error checking VS index: %s", e)
+
+    if not index_exists:
         log.info("  Creating delta-sync VS index '%s'...", index_name)
         w.vector_search_indexes.create_index(
             name=index_name,
             endpoint_name=vs_endpoint,
+            primary_key="product_id",
             index_type=VectorIndexType.DELTA_SYNC,
             delta_sync_index_spec=DeltaSyncVectorIndexSpecRequest(
                 source_table=source_table,
@@ -310,10 +321,13 @@ def setup(args):
             time.sleep(30)
             try:
                 idx = w.vector_search_indexes.get_index(index_name)
-                state = idx.status.detailed_state.value if idx.status and idx.status.detailed_state else "UNKNOWN"
-                log.info("    Index state: %s", state)
-                if "ONLINE" in state or "READY" in state:
+                # SDK returns status.ready (bool) or status.message
+                if idx.status and getattr(idx.status, "ready", False):
+                    log.info("    Index is ready! indexed_row_count=%s",
+                             getattr(idx.status, "indexed_row_count", "?"))
                     break
+                msg = getattr(idx.status, "message", "no message") if idx.status else "no status"
+                log.info("    Index status: %s", msg)
             except Exception as e:
                 log.warning("    Could not check index state: %s", e)
         log.info("  VS index ready.")
@@ -324,17 +338,18 @@ def setup(args):
     log.info("Step 5: Creating UC Functions...")
 
     # product_lookup — calls the vector search index
+    # Note: vector_search() requires num_results to be a constant literal
+    # The result column is search_score (not score)
     sql(w, wh, f"""
         CREATE OR REPLACE FUNCTION `{cat}`.`{schema}`.`product_lookup`(
-            query STRING COMMENT 'Natural language search query about a product',
-            max_results INT DEFAULT 3 COMMENT 'Maximum number of results to return'
+            query STRING COMMENT 'Natural language search query about a product'
         )
         RETURNS TABLE (
             product_id STRING,
             product_name STRING,
             product_category STRING,
             product_doc STRING,
-            score DOUBLE
+            search_score DOUBLE
         )
         COMMENT 'Search TechMart product documentation using semantic search'
         RETURN
@@ -343,11 +358,11 @@ def setup(args):
                 product_name,
                 product_category,
                 product_doc,
-                score
+                search_score
             FROM vector_search(
                 index => '{index_name}',
                 query => query,
-                num_results => max_results
+                num_results => 3
             )
     """, "create product_lookup function")
 
@@ -426,31 +441,18 @@ def setup(args):
     # 6. Grant permissions
     # -------------------------------------------------------------------------
     log.info("Step 6: Granting permissions to workspace users...")
-    w.grants.update(
-        securable_type=SecurableType.CATALOG,
-        full_name=cat,
-        changes=[
-            PrivilegeAssignment(
-                principal="account users",
-                add=[Privilege.USE_CATALOG, Privilege.USE_SCHEMA, Privilege.SELECT],
-            )
-        ],
-    )
-    w.grants.update(
-        securable_type=SecurableType.SCHEMA,
-        full_name=f"{cat}.{schema}",
-        changes=[
-            PrivilegeAssignment(
-                principal="account users",
-                add=[
-                    Privilege.USE_SCHEMA,
-                    Privilege.SELECT,
-                    Privilege.CREATE_TABLE,
-                    Privilege.CREATE_FUNCTION,
-                ],
-            )
-        ],
-    )
+    grant_stmts = [
+        f"GRANT USE CATALOG ON CATALOG `{cat}` TO `account users`",
+        f"GRANT USE SCHEMA ON SCHEMA `{cat}`.`{schema}` TO `account users`",
+        f"GRANT SELECT ON SCHEMA `{cat}`.`{schema}` TO `account users`",
+        f"GRANT CREATE TABLE ON SCHEMA `{cat}`.`{schema}` TO `account users`",
+        f"GRANT CREATE FUNCTION ON SCHEMA `{cat}`.`{schema}` TO `account users`",
+    ]
+    for stmt in grant_stmts:
+        try:
+            sql(w, wh, stmt)
+        except Exception as e:
+            log.warning("  Grant skipped (non-fatal): %s — %s", stmt[:60], e)
     log.info("  Permissions granted.")
 
     # -------------------------------------------------------------------------

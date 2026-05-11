@@ -117,8 +117,7 @@ The agent will call these as tools. Run this SQL to create them:
 ```sql
 -- Tool 1: Semantic search over product documentation
 CREATE OR REPLACE FUNCTION {{CATALOG}}.{{SCHEMA}}.product_lookup(
-    query STRING COMMENT 'Natural language question about a product',
-    max_results INT DEFAULT 3 COMMENT 'Max results to return'
+    query STRING COMMENT 'Natural language question about a product'
 )
 RETURNS TABLE (
     product_id STRING,
@@ -133,7 +132,7 @@ RETURN
     FROM vector_search(
         index => '{{CATALOG}}.{{SCHEMA}}.product_docs_vs',
         query => query,
-        num_results => max_results
+        num_results => 3
     );
 
 -- Tool 2: Direct product inventory lookup
@@ -192,206 +191,213 @@ SELECT * FROM {{CATALOG}}.{{SCHEMA}}.get_return_policy();
 
 ### 2b. Build the Agent App
 
-Create a new directory for your agent and write the following files.
-Ask Claude to help you create them — say "Help me build the agent files using the blueprint below."
+The workshop agent uses the official **agent-langgraph** template pattern:
+- `DatabricksMCPServer` exposes UC functions as MCP tools (no SDK imports needed in agent code)
+- `mlflow.genai.start_server` handles the HTTP server and tracing
+- `AsyncCheckpointSaver` (Lakebase) gives the agent per-conversation memory
+- Deployed via `databricks bundle deploy` — no manual app creation needed
 
-**File: `agent.py`**
+Create a folder `agent_server/` with these files. Ask Claude to help you write them.
+
+**File: `agent_server/__init__.py`** — empty
+
+**File: `agent_server/agent.py`**
 
 ```python
 """
-TechMart Customer Support Agent
-LangGraph + UCFunctionToolkit + VectorSearchRetrieverTool
-Served via FastAPI for Databricks Apps deployment
+TechMart Customer Support Agent — intentionally WITHOUT guardrails.
+You will find the bugs in Step 3, measure them in Step 4, and fix them in Step 5.
 """
+import os, logging
+from typing import AsyncGenerator
 
-import os
-import logging
 import mlflow
-from typing import Annotated, TypedDict, Sequence
+from databricks_langchain import ChatDatabricks, DatabricksMCPServer, AsyncCheckpointSaver
+from langgraph.prebuilt import create_react_agent
+from mlflow.genai.agent_server import invoke, stream
+from mlflow.types.responses import (
+    ResponsesAgentRequest, ResponsesAgentResponse, ResponsesAgentStreamEvent,
+)
+from agent_server.utils import get_messages_and_context, process_agent_astream_events
 
-from fastapi import FastAPI
-from pydantic import BaseModel
+log = logging.getLogger(__name__)
 
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
-from langchain_databricks import ChatDatabricks
-from langchain_databricks.agents import UCFunctionToolkit
-from langchain_databricks.tools import VectorSearchRetrieverTool
-from langgraph.graph import StateGraph, END
-from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode
+CATALOG  = os.environ.get("WORKSHOP_CATALOG", "{{CATALOG}}")
+SCHEMA   = os.environ.get("WORKSHOP_SCHEMA",  "{{SCHEMA}}")
+LLM      = os.environ.get("LLM_ENDPOINT",     "databricks-claude-sonnet-4-7")
+LAKEBASE = os.environ.get("LAKEBASE_INSTANCE_NAME", "")
+HOST     = os.environ.get("DATABRICKS_HOST", "")
 
-logging.basicConfig(level=logging.INFO)
-
-CATALOG = os.environ.get("WORKSHOP_CATALOG", "{{CATALOG}}")
-SCHEMA  = os.environ.get("WORKSHOP_SCHEMA",  "{{SCHEMA}}")
-LLM     = os.environ.get("LLM_ENDPOINT",     "databricks-claude-sonnet-4-7")
-VS_IDX  = f"{CATALOG}.{SCHEMA}.product_docs_vs"
-VS_EP   = "anthony_ivan_test_vs_endpoint"
-
-mlflow.set_tracking_uri("databricks")
-mlflow.set_experiment(os.environ.get("MLFLOW_EXPERIMENT", "/Users/{{USER}}/cs-agent-workshop"))
-mlflow.langchain.autolog(log_traces=True)
-
-SYSTEM_PROMPT = """You are a helpful customer support agent for TechMart, a technology retailer.
-You help customers with product questions, order lookups, and return requests.
-
-You have four tools:
-- product_lookup: semantic search over product documentation
-- get_product_details: get inventory and pricing for a specific product
-- get_order_status: look up an order by order ID
-- get_return_policy: retrieve the return and warranty policy
-
-Guidelines:
-- Always search for product information before answering product questions
-- Be helpful and complete in your answers
-- Use the tools to look up accurate information
+# ── Intentionally minimal system prompt — no guardrails ──────────────────────
+SYSTEM_PROMPT = f"""You are a helpful customer support agent for TechMart, a technology retailer.
+You assist customers with products, orders, returns, and policies.
+Use your tools to look up accurate information. Catalog: {CATALOG}.{SCHEMA}
 """
 
-llm = ChatDatabricks(endpoint=LLM, temperature=0.1, max_tokens=1024)
-
-uc_tools = UCFunctionToolkit(function_names=[
-    f"{CATALOG}.{SCHEMA}.product_lookup",
-    f"{CATALOG}.{SCHEMA}.get_product_details",
-    f"{CATALOG}.{SCHEMA}.get_order_status",
-    f"{CATALOG}.{SCHEMA}.get_return_policy",
-]).tools
-
-vs_tool = VectorSearchRetrieverTool(
-    index_name=VS_IDX,
-    tool_name="product_search",
-    tool_description="Search TechMart product docs for features, specs, and availability.",
-    text_column="product_doc",
-    num_results=3,
+# UC functions exposed as MCP tools — no SDK imports, no toolkit wrappers
+uc_mcp = DatabricksMCPServer(
+    url=f"{HOST}/api/2.0/mcp/functions/{CATALOG}/{SCHEMA}",
+    name="techmart_tools",
 )
 
-all_tools = uc_tools + [vs_tool]
-tool_node = ToolNode(all_tools)
-llm_with_tools = llm.bind_tools(all_tools)
+model = ChatDatabricks(endpoint=LLM)
 
 
-class AgentState(TypedDict):
-    messages: Annotated[Sequence[BaseMessage], add_messages]
+@invoke()
+async def non_streaming(request: ResponsesAgentRequest) -> ResponsesAgentResponse:
+    outputs = [
+        event.item async for event in streaming(request)
+        if event.type == "response.output_item.done"
+    ]
+    return ResponsesAgentResponse(output=outputs)
 
 
-def agent_node(state: AgentState) -> AgentState:
-    msgs = list(state["messages"])
-    if not any(isinstance(m, SystemMessage) for m in msgs):
-        msgs = [SystemMessage(content=SYSTEM_PROMPT)] + msgs
-    return {"messages": [llm_with_tools.invoke(msgs)]}
+@stream()
+async def streaming(request: ResponsesAgentRequest) -> AsyncGenerator[ResponsesAgentStreamEvent, None]:
+    messages, context = get_messages_and_context(request)
+    thread_id = context.get("conversation_id", "default")
 
+    tools = await uc_mcp.get_tools()
+    agent = create_react_agent(model=model, tools=tools, prompt=SYSTEM_PROMPT)
 
-def should_continue(state: AgentState) -> str:
-    last = state["messages"][-1]
-    return "tools" if (hasattr(last, "tool_calls") and last.tool_calls) else END
+    async with AsyncCheckpointSaver(instance_name=LAKEBASE) as checkpointer:
+        runnable = agent.with_config(checkpointer=checkpointer)
+        config   = {"configurable": {"thread_id": thread_id}}
+        async for event in process_agent_astream_events(
+            runnable.astream({"messages": messages}, config,
+                             stream_mode=["updates", "messages"])
+        ):
+            yield event
+```
 
+**File: `agent_server/utils.py`** — copy from the reference repo (handles message conversion and stream event processing)
 
-graph = StateGraph(AgentState)
-graph.add_node("agent", agent_node)
-graph.add_node("tools", tool_node)
-graph.set_entry_point("agent")
-graph.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
-graph.add_edge("tools", "agent")
-graph = graph.compile()
+**File: `agent_server/start_server.py`**
 
-app = FastAPI(title="TechMart Customer Support Agent")
+```python
+import os, mlflow
+from dotenv import load_dotenv
+load_dotenv()
 
-
-class ChatRequest(BaseModel):
-    message: str
-    session_id: str = "default"
-    conversation_history: list[dict] = []
-
-
-class ChatResponse(BaseModel):
-    response: str
-    session_id: str
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok", "model": LLM}
-
-
-@app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest):
-    messages = []
-    for turn in request.conversation_history:
-        if turn.get("role") == "user":
-            messages.append(HumanMessage(content=turn["content"]))
-        elif turn.get("role") == "assistant":
-            messages.append(AIMessage(content=turn["content"]))
-    messages.append(HumanMessage(content=request.message))
-    result = graph.invoke({"messages": messages})
-    final = result["messages"][-1]
-    return ChatResponse(
-        response=final.content if isinstance(final, AIMessage) else str(final.content),
-        session_id=request.session_id,
-    )
-
+def main():
+    exp = os.getenv("MLFLOW_EXPERIMENT_ID", "")
+    if exp:
+        mlflow.set_experiment(experiment_id=exp)
+    import agent_server.agent  # noqa — registers @invoke/@stream
+    mlflow.langchain.autolog()
+    mlflow.genai.start_server(host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("DATABRICKS_APP_PORT", "8080")))
+    main()
 ```
 
-**File: `app.yaml`**
+**File: `pyproject.toml`**
+
+```toml
+[project]
+name = "cs-agent-workshop"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "databricks-langchain[memory]>=0.5.0",
+    "databricks-sdk>=0.45.0",
+    "langgraph>=0.3.0",
+    "mlflow>=3.0.0",
+    "uvicorn>=0.34.2",
+    "python-dotenv>=1.0.1",
+]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+[tool.hatch.build.targets.wheel]
+packages = ["agent_server"]
+[tool.uv]
+package = true
+[project.scripts]
+start-server = "agent_server.start_server:main"
+```
+
+**File: `databricks.yml`**
 
 ```yaml
-command: ["uvicorn", "agent:app", "--host", "0.0.0.0", "--port", "${DATABRICKS_APP_PORT}"]
+bundle:
+  name: cs_agent_workshop
 
-env:
-  - name: DATABRICKS_HOST
-    valueFrom: workspace_url
-  - name: DATABRICKS_TOKEN
-    valueFrom: current_user_token
-  - name: WORKSHOP_CATALOG
-    value: "{{CATALOG}}"
-  - name: WORKSHOP_SCHEMA
-    value: "{{SCHEMA}}"
-  - name: LLM_ENDPOINT
-    value: "databricks-claude-sonnet-4-7"
-  - name: MLFLOW_EXPERIMENT
-    value: "/Users/{{USER}}/cs-agent-workshop"
+resources:
+  experiments:
+    cs_agent_workshop_experiment:
+      name: /Users/${workspace.current_user.userName}/cs-agent-workshop-${bundle.target}
+  apps:
+    cs_agent_workshop:
+      name: "cs-agent-{{USERNAME}}"
+      description: "TechMart CS Agent"
+      source_code_path: ./
+      config:
+        command: ["uv", "run", "start-server"]
+        env:
+          - name: MLFLOW_EXPERIMENT_ID
+            value_from: experiment
+          - name: DATABRICKS_HOST
+            value: "${workspace.host}"
+          - name: WORKSHOP_CATALOG
+            value: "{{CATALOG}}"
+          - name: WORKSHOP_SCHEMA
+            value: "{{SCHEMA}}"
+          - name: LLM_ENDPOINT
+            value: "databricks-claude-sonnet-4-7"
+          - name: LAKEBASE_INSTANCE_NAME
+            value_from: database
+      resources:
+        - name: experiment
+          experiment:
+            experiment_id: ""
+            permission: CAN_MANAGE
+        - name: database
+          database:
+            instance_name: "agent-pdpa-st-mem"
+            database_name: databricks_postgres
+            permission: CAN_CONNECT_AND_CREATE
+targets:
+  dev:
+    mode: development
+    default: true
 ```
 
-**File: `requirements.txt`**
+**File: `.env`** (for local testing only — not committed to git)
 
 ```
-databricks-langchain>=0.4.0
-langchain>=0.3.0
-langchain-core>=0.3.0
-langgraph>=0.2.0
-mlflow>=2.19.0
-fastapi>=0.115.0
-uvicorn>=0.30.0
-pydantic>=2.0.0
+DATABRICKS_CONFIG_PROFILE=<your-profile>
+WORKSHOP_CATALOG={{CATALOG}}
+WORKSHOP_SCHEMA={{SCHEMA}}
+LAKEBASE_INSTANCE_NAME=agent-pdpa-st-mem
 ```
 
 ### 2c. Deploy as a Databricks App
 
 ```bash
-# Create a Databricks App (do this once)
-databricks apps create cs-agent-{{USERNAME}} --description "TechMart Customer Support Agent"
+# Validate the bundle config
+databricks bundle validate
 
-# Sync your agent files to the workspace
-databricks sync . /Workspace/Users/{{USER}}/projects/cs-agent-workshop --watch &
+# Deploy (creates the app, uploads files, wires resources)
+databricks bundle deploy
 
-# Deploy the app
-databricks apps deploy cs-agent-{{USERNAME}} \
-  --source-code-path /Workspace/Users/{{USER}}/projects/cs-agent-workshop
+# Start the app
+databricks bundle run cs_agent_workshop
 
-# Check deployment status
-databricks apps get cs-agent-{{USERNAME}}
+# Check status
+databricks apps get cs-agent-{{USERNAME}}-dev
 ```
 
-Once deployed, the app will have a URL like:
-`https://cs-agent-{{USERNAME}}-2226288096546970.aws.databricksapps.com`
+> The app URL appears in the output of `databricks apps get`. It looks like:
+> `https://cs-agent-{{USERNAME}}-dev-<workspace-id>.aws.databricksapps.com`
 
 Test it:
 ```bash
-curl -X POST "https://<your-app-url>/chat" \
+TOKEN=$(databricks auth token | jq -r .access_token)
+curl -X POST "https://<your-app-url>/invocations" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"message": "What wireless headphones do you have?"}'
+  -d '{"input": [{"role": "user", "content": "What wireless headphones do you have?"}]}'
 ```
 
 ---
@@ -673,17 +679,16 @@ w.vector_search_indexes.sync_index("{{CATALOG}}.{{SCHEMA}}.product_docs_vs")
 After making your changes:
 
 ```bash
-# Sync updated files to workspace
-databricks sync . /Workspace/Users/{{USER}}/projects/cs-agent-workshop
+# Redeploy with bundle (picks up all file changes)
+databricks bundle deploy
+databricks bundle run cs_agent_workshop
 
-# Redeploy the app
-databricks apps deploy cs-agent-{{USERNAME}} \
-  --source-code-path /Workspace/Users/{{USER}}/projects/cs-agent-workshop
-
-# Wait for deployment, then test
-curl -X POST "https://<your-app-url>/chat" \
+# Then re-test
+TOKEN=$(databricks auth token | jq -r .access_token)
+curl -X POST "https://<your-app-url>/invocations" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"message": "What warranty comes with your headphones?"}'
+  -d '{"input": [{"role": "user", "content": "What warranty comes with your headphones?"}]}'
 ```
 
 ### 5c. Re-run Evaluation
@@ -724,24 +729,19 @@ results = w.vector_search_indexes.query_index(
 print(results)
 ```
 
-### If UCFunctionToolkit raises permission error
+### If MCP tool calls fail with permission error
 ```sql
--- Grant execute on functions
-GRANT EXECUTE ON FUNCTION {{CATALOG}}.{{SCHEMA}}.product_lookup TO `{{USER}}`;
-GRANT EXECUTE ON FUNCTION {{CATALOG}}.{{SCHEMA}}.get_product_details TO `{{USER}}`;
-GRANT EXECUTE ON FUNCTION {{CATALOG}}.{{SCHEMA}}.get_order_status TO `{{USER}}`;
-GRANT EXECUTE ON FUNCTION {{CATALOG}}.{{SCHEMA}}.get_return_policy TO `{{USER}}`;
+-- Grant execute on all UC functions in the schema to the app service principal
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA {{CATALOG}}.{{SCHEMA}}
+  TO `<your-app-service-principal>`;
+-- Find SP name with: databricks apps get cs-agent-{{USERNAME}}-dev --output json | jq .service_principal_name
 ```
 
-### If app deployment fails
+### If app crashes at startup
 ```bash
-# Check app logs
-databricks apps logs cs-agent-{{USERNAME}}
-
-# Check if app exists
-databricks apps get cs-agent-{{USERNAME}}
-
-# If too many apps error: check with instructor for a shared app URL
+# Check bundle deploy output for errors
+databricks apps get cs-agent-{{USERNAME}}-dev
+# Logs via the Databricks UI: Apps → your app → Logs tab
 ```
 
 ### If MLflow tracing isn't showing up
