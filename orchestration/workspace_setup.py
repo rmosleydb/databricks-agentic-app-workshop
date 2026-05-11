@@ -10,6 +10,8 @@ What this script does:
   4. Creates or verifies the vector search endpoint and delta-sync index
   5. Creates UC Functions participants will use as agent tools
   6. Grants permissions to all workspace users
+  7. Provisions a shared Lakebase instance for agent conversation memory
+     (all participants share one instance; conversations are isolated by thread_id)
 
 Usage:
     python orchestration/workspace_setup.py \\
@@ -17,9 +19,14 @@ Usage:
         --workshop-catalog workshop_catalog \\
         --workshop-schema customer_support_workshop \\
         --source-catalog robert_mosley \\
-        --source-schema customer_support
+        --source-schema customer_support \\
+        --lakebase-name cs-agent-workshop-memory
 
-The script is idempotent — safe to re-run.
+The script is idempotent — safe to re-run. The Lakebase instance creation
+takes ~5 minutes on first run; subsequent runs skip it if it already exists.
+
+After running, give participants the printed WORKSHOP_CATALOG, WORKSHOP_SCHEMA,
+and LAKEBASE_INSTANCE_NAME values to put in their databricks.yml before deploying.
 """
 
 import argparse
@@ -35,6 +42,7 @@ from databricks.sdk.service.vectorsearch import (
     EmbeddingSourceColumn,
     PipelineType,
 )
+from databricks.sdk.service.database import DatabaseInstance
 
 logging.basicConfig(
     level=logging.INFO,
@@ -456,6 +464,38 @@ def setup(args):
     log.info("  Permissions granted.")
 
     # -------------------------------------------------------------------------
+    # 7. Provision shared Lakebase instance (for agent conversation memory)
+    # -------------------------------------------------------------------------
+    log.info("Step 7: Provisioning shared Lakebase instance for agent memory...")
+    lakebase_name = args.lakebase_name
+
+    lakebase_instance = None
+    try:
+        existing = list(w.database.list_database_instances())
+        for inst in existing:
+            if inst.name == lakebase_name:
+                lakebase_instance = inst
+                log.info("  Lakebase instance '%s' already exists (state: %s)",
+                         lakebase_name, inst.state)
+                break
+    except Exception as e:
+        log.warning("  Could not list Lakebase instances: %s", e)
+
+    if lakebase_instance is None:
+        log.info("  Creating Lakebase instance '%s' (CU_1) — this takes ~5 minutes...", lakebase_name)
+        try:
+            waiter = w.database.create_database_instance(
+                DatabaseInstance(name=lakebase_name, capacity="CU_1")
+            )
+            lakebase_instance = waiter.result(timeout=datetime.timedelta(minutes=15))
+            log.info("  Lakebase instance '%s' is ready.", lakebase_name)
+        except Exception as e:
+            log.error("  Failed to create Lakebase instance: %s", e)
+            log.error("  You can create it manually in the Databricks UI under Compute > Lakebase")
+            log.error("  Then re-run this script or set --lakebase-name to an existing instance.")
+            lakebase_instance = None
+
+    # -------------------------------------------------------------------------
     # Done
     # -------------------------------------------------------------------------
     log.info("")
@@ -468,11 +508,17 @@ def setup(args):
     log.info("  VS Index:       %s", index_name)
     log.info("  UC Functions:   product_lookup, get_product_details,")
     log.info("                  get_order_status, get_return_policy")
+    log.info("  Lakebase:       %s  (shared by all participants)", lakebase_name)
+    log.info("")
+    log.info("Give participants these values for their databricks.yml:")
+    log.info("  WORKSHOP_CATALOG=%s", cat)
+    log.info("  WORKSHOP_SCHEMA=%s", schema)
+    log.info("  LAKEBASE_INSTANCE_NAME=%s", lakebase_name)
     log.info("")
     log.info("Next steps:")
-    log.info("  1. Run user_setup.py for each attendee")
-    log.info("  2. Verify preflight checklist in enablement/instructor_guide.md")
-    log.info("  3. Have fallback: app URL ready to share if someone falls behind")
+    log.info("  1. Share the GitHub repo link with participants")
+    log.info("  2. Participants run: databricks bundle deploy && databricks bundle run")
+    log.info("  3. Verify preflight checklist in enablement/instructor_guide.md")
 
 
 # ---------------------------------------------------------------------------
@@ -497,5 +543,7 @@ if __name__ == "__main__":
                         help="Source schema with the original data")
     parser.add_argument("--vs-endpoint", default="anthony_ivan_test_vs_endpoint",
                         help="Vector search endpoint name")
+    parser.add_argument("--lakebase-name", default="cs-agent-workshop-memory",
+                        help="Name for the shared Lakebase instance (created if it doesn't exist)")
     args = parser.parse_args()
     setup(args)

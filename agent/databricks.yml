@@ -3,14 +3,14 @@ bundle:
 
 variables:
   catalog:
-    description: "Workshop catalog"
+    description: "Workshop catalog (set by instructor after running workspace_setup.py)"
     default: "robert_mosley"
   schema:
-    description: "Workshop schema"
+    description: "Workshop schema (set by instructor after running workspace_setup.py)"
     default: "cs_workshop"
   lakebase_instance:
-    description: "Lakebase provisioned instance name for agent memory"
-    default: "agent-pdpa-st-mem"
+    description: "Shared Lakebase instance name (set by instructor after running workspace_setup.py)"
+    default: "cs-agent-workshop-memory"
 
 resources:
   experiments:

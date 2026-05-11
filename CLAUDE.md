@@ -23,14 +23,20 @@ small wins — deploying an app is a big deal.
 
 ## Your Workspace
 
+The instructor ran `workspace_setup.py` before the workshop and will share these values with you.
+Fill them in now — you'll use them throughout.
+
 ```
-Catalog:        {{CATALOG}}
-Schema:         {{SCHEMA}}
-Warehouse ID:   f45852ca675f5dcb
-VS Endpoint:    anthony_ivan_test_vs_endpoint
-VS Index:       {{CATALOG}}.{{SCHEMA}}.product_docs_vs
-MLflow Exp:     /Users/{{USER}}/cs-agent-workshop
+Catalog:         {{CATALOG}}           ← given by instructor
+Schema:          {{SCHEMA}}            ← given by instructor
+Lakebase:        {{LAKEBASE}}          ← given by instructor (shared by everyone)
+Warehouse ID:    f45852ca675f5dcb
+VS Index:        {{CATALOG}}.{{SCHEMA}}.product_docs_vs
+MLflow Exp:      /Users/{{USER}}/cs-agent-workshop
 ```
+
+> Each participant deploys their own app. All apps share the same catalog, data, UC functions,
+> and Lakebase instance. Conversations are isolated per-user by `thread_id`.
 
 ## The Story
 
@@ -350,11 +356,11 @@ resources:
       resources:
         - name: experiment
           experiment:
-            experiment_id: ""
+            experiment_id: ${resources.experiments.cs_agent_workshop_experiment.experiment_id}
             permission: CAN_MANAGE
         - name: database
           database:
-            instance_name: "agent-pdpa-st-mem"
+            instance_name: "{{LAKEBASE}}"
             database_name: databricks_postgres
             permission: CAN_CONNECT_AND_CREATE
 targets:
@@ -369,7 +375,7 @@ targets:
 DATABRICKS_CONFIG_PROFILE=<your-profile>
 WORKSHOP_CATALOG={{CATALOG}}
 WORKSHOP_SCHEMA={{SCHEMA}}
-LAKEBASE_INSTANCE_NAME=agent-pdpa-st-mem
+LAKEBASE_INSTANCE_NAME={{LAKEBASE}}
 ```
 
 ### 2c. Deploy as a Databricks App

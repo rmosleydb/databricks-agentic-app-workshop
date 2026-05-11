@@ -11,33 +11,64 @@ that most teams take weeks to figure out."
 
 ## Pre-Session Setup (Start 30 min before)
 
+### T-24 hours: Run workspace setup
+
+Run this once the day before (or at least an hour before the workshop).
+The Lakebase instance takes ~5 minutes to provision, so don't leave it to the last minute.
+
+```bash
+cd databricks-cs-agent-workshop
+
+python orchestration/workspace_setup.py \
+    --profile <your-databricks-profile> \
+    --workshop-catalog <catalog-name> \
+    --workshop-schema cs_workshop \
+    --source-catalog robert_mosley \
+    --source-schema customer_support \
+    --lakebase-name cs-agent-workshop-memory
+```
+
+At the end, the script prints three values — **share these with participants** at the start:
+
+```
+WORKSHOP_CATALOG=<catalog-name>
+WORKSHOP_SCHEMA=cs_workshop
+LAKEBASE_INSTANCE_NAME=cs-agent-workshop-memory
+```
+
+Participants paste these into their `databricks.yml` in Step 2b. Every participant's app
+connects to the same Lakebase instance; conversations are isolated by `thread_id`.
+
 ### 15 min before: Verify infrastructure
 
 Run these checks yourself before participants arrive:
 
 ```bash
-# 1. Workspace setup was run and tables exist
-databricks --profile ai-specialist tables list \
-  --catalog-name workshop_catalog \
-  --schema-name customer_support_workshop
+# 1. Tables exist
+databricks tables list \
+  --catalog-name <catalog-name> \
+  --schema-name cs_workshop
 
-# Expected: products, product_docs, product_docs_vs, customers,
-#           orders, order_details, policies, cust_service_data
+# Expected: products, product_docs, customers, orders, order_details, policies
 
 # 2. Vector search index is ONLINE
-databricks --profile ai-specialist vector-search indexes get \
-  workshop_catalog.customer_support_workshop.product_docs_vs
+databricks vector-search indexes get \
+  <catalog-name>.cs_workshop.product_docs_vs
 
 # Expected: "detailed_state": "ONLINE"
 
-# 3. UC Functions work
-# Run this in a notebook:
-# SELECT * FROM workshop_catalog.customer_support_workshop.product_lookup('laptop')
-# Expect: 3 rows with product docs
+# 3. UC Functions work — run in a notebook:
+# SELECT * FROM <catalog>.cs_workshop.product_lookup('laptop')
+# Expect: rows with product docs
 
-# 4. You have a fallback agent app URL ready
-# Pre-deploy the agent in agent/ and note the URL
-# This is your "rescue rope" if someone can't deploy
+# 4. Lakebase instance is AVAILABLE
+python3 -c "
+from databricks.sdk import WorkspaceClient
+w = WorkspaceClient()
+inst = w.database.get_database_instance('cs-agent-workshop-memory')
+print(inst.name, inst.state)
+"
+# Expected: cs-agent-workshop-memory DatabaseInstanceState.AVAILABLE
 ```
 
 ### Have ready on your screen:
