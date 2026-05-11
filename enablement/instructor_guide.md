@@ -1,0 +1,211 @@
+# Instructor Guide: From Prompt to Production
+
+## The 30-Second Pitch
+
+"You're going to build an AI customer support agent from scratch, deploy it live,
+deliberately break it, measure the breakage with LLM judges, fix it, and prove
+it improved — all in under two hours. That's the entire agent hardening lifecycle
+that most teams take weeks to figure out."
+
+---
+
+## Pre-Session Setup (Start 30 min before)
+
+### 15 min before: Verify infrastructure
+
+Run these checks yourself before participants arrive:
+
+```bash
+# 1. Workspace setup was run and tables exist
+databricks --profile ai-specialist tables list \
+  --catalog-name workshop_catalog \
+  --schema-name customer_support_workshop
+
+# Expected: products, product_docs, product_docs_vs, customers,
+#           orders, order_details, policies, cust_service_data
+
+# 2. Vector search index is ONLINE
+databricks --profile ai-specialist vector-search indexes get \
+  workshop_catalog.customer_support_workshop.product_docs_vs
+
+# Expected: "detailed_state": "ONLINE"
+
+# 3. UC Functions work
+# Run this in a notebook:
+# SELECT * FROM workshop_catalog.customer_support_workshop.product_lookup('laptop')
+# Expect: 3 rows with product docs
+
+# 4. You have a fallback agent app URL ready
+# Pre-deploy the agent in agent/ and note the URL
+# This is your "rescue rope" if someone can't deploy
+```
+
+### Have ready on your screen:
+- Databricks workspace with workshop catalog open
+- The MLflow experiment URL
+- Your fallback agent app URL
+- This guide on a second screen
+
+---
+
+## Workshop Timing Guide
+
+| Time | Activity | Notes |
+|------|----------|-------|
+| 0:00 | Intro (5 min) | The TechMart story, why this matters |
+| 0:05 | Step 1: Explore (15 min) | SQL queries in notebook. Monitor Slack for stragglers. |
+| 0:20 | Step 2: Build (25 min) | Most time. Monitor: UC Functions, app deployment. |
+| 0:45 | Step 2 check (5 min) | Confirm everyone has a deployed app before moving on |
+| 0:50 | Step 3: Break (10 min) | Fun part — let them poke the agent |
+| 1:00 | Debrief Step 3 (5 min) | Ask: what did you find? Build shared vocabulary. |
+| 1:05 | Step 4: Evaluate (30 min) | Generate traces, label, run judges |
+| 1:35 | Step 5: Fix (20 min) | Pick one fix, redeploy, re-evaluate |
+| 1:55 | Wrap-up (5 min) | What you built, takeaways, next steps |
+
+---
+
+## Workshop Intro Script (5 min)
+
+Say something like:
+
+"Imagine you're a data engineer at TechMart. Leadership approved an AI support agent.
+The customer data is already in Unity Catalog. Your job is to build the agent,
+make sure it works correctly, and harden it before launch.
+
+Here's the catch: the data isn't perfect. There are some quality issues baked in —
+wrong information, off-brand language, ambiguous policies. Your job is to find them
+using the same evaluation framework you'd use in production.
+
+By the end, you'll have a live agent, real traces, quantified quality scores,
+and a fixed version that scores better. That's the lifecycle.
+
+Let's start by looking at the data."
+
+---
+
+## Step-by-Step Facilitation Notes
+
+### Step 1 — Explore (15 min)
+
+Encourage free exploration. Common useful queries:
+- `SELECT DISTINCT product_category FROM products` — understand the catalog
+- `SELECT * FROM product_docs WHERE product_doc LIKE '%discontinued%' LIMIT 5` — hint at the bug
+- `SELECT * FROM policies` — shows the return policy + the vague one we injected
+
+**Things to listen for:**
+- "Some of these docs sound weird" — great, note that observation
+- "This product says it's available but it's marked discontinued" — excellent catch
+- Don't spoil it — let them discover
+
+### Step 2 — Build (25 min)
+
+This is where people will need the most help. Watch for:
+
+| Problem | Likely Cause | Fix |
+|---------|--------------|-----|
+| UCFunctionToolkit raises AnalysisException | Permission not granted | Run GRANT EXECUTE in SQL |
+| App deployment fails with "app limit exceeded" | Workspace has too many apps | Point them to shared app URL |
+| `databricks apps deploy` hangs | Workspace sync still running | Wait 60s, try again |
+| LangGraph import error | Wrong package version | `pip install databricks-langchain langgraph` |
+| Vector search returns 0 results | Index still syncing | Wait and retry, or use product_lookup SQL fallback |
+
+**The most common issue:** forgetting to wait for the app to fully deploy before testing it.
+Tell people: "After `apps deploy` returns, wait 2 minutes, then check `/health`."
+
+**If someone is stuck on deployment after 15 min:** Give them your fallback app URL.
+They can still do Steps 3-5 using a shared agent. Don't let deployment block the learning.
+
+### Step 3 — Break (10 min)
+
+This is the fun, high-energy part. Encourage participants to share what they find.
+
+Great debrief questions:
+- "What was the most surprising thing the agent said?"
+- "How many of you saw a warranty claim? What did it say?"
+- "Did anyone get the agent to approve a return it shouldn't have?"
+
+**The 4 issues they should find:**
+1. Discontinued product described as available → "You can order it today!"
+2. Warranty claim of "3 years" (real policy: 1 year)
+3. Pushy/aggressive language: "ACT NOW", "DON'T MISS OUT"
+4. Vague return policy: agent approves returns outside 30-day window
+
+They won't find all four without prompting. That's fine — the judges in Step 4
+will surface all of them even if the participant only tested for one.
+
+### Step 4 — Evaluate (30 min)
+
+This step has the most moving pieces. Walk through it together if needed.
+
+**Common gotchas:**
+- `mlflow.genai.evaluate()` requires `mlflow>=2.19.0` — verify before the session
+- The eval dataset needs to have `inputs` and `outputs` columns in the right format
+- If participants didn't get traces from their own agent, they can use the demo dataset in `create_judges.py`
+
+**What success looks like:**
+- At least one judge has a <100% pass rate
+- The participant can point to a specific row and say "this is the warranty issue" or "this is the tone issue"
+
+**If someone finishes early:** Have them add a 4th judge for `availability_accuracy`
+(does the agent ever recommend discontinued products?).
+
+### Step 5 — Fix (20 min)
+
+**Two valid fix paths:**
+
+1. **System prompt fix (fastest, 10 min):** Add guardrails to the SYSTEM_PROMPT.
+   This works immediately — no data sync needed. Best for time-constrained sessions.
+
+2. **Data fix (thorough, 15 min):** UPDATE the product_docs table, then trigger
+   a vector search index sync. Takes ~5 min for the index to update.
+
+Recommend participants do the system prompt fix first, then attempt the data fix
+if time allows.
+
+**Before they close:** Make sure they run the eval a second time and see the scores improve.
+That moment — "before: 60%, after: 100%" — is the takeaway.
+
+---
+
+## Wrap-Up Talking Points (5 min)
+
+"Let's recap what you actually built today:
+
+1. You connected live data from Unity Catalog as agent tools — not a static knowledge base, actual structured data that updates.
+
+2. You deployed a live app, accessible via HTTP, with MLflow tracing on every call.
+
+3. You didn't just test it manually — you ran 25 scripted conversations and got quantitative pass rates.
+
+4. You created judges that know your policy, your tone standards, and your data quality requirements. Those judges run in seconds, not human-hours.
+
+5. You fixed something and proved it worked. Not 'it seems better' — you have numbers.
+
+This is the loop. When your data changes, you run the eval. When you change your prompt, you run the eval. When your LLM provider updates their model, you run the eval.
+
+That's how you put an agent in production and keep it there."
+
+---
+
+## Common Failure Modes
+
+| Symptom | Root Cause | Prevention |
+|---------|-----------|------------|
+| App deploys but /chat returns 500 | Missing env var in app.yaml | Verify WORKSHOP_CATALOG/SCHEMA are set |
+| Agent says "I don't know" for everything | VS index is still syncing | Run workspace_setup.py earlier, check index state |
+| mlflow.genai.evaluate() fails | Eval dataset format wrong | Use the demo dataset in create_judges.py as reference |
+| App times out on first request | Cold start on large LangGraph init | Hit /health first to warm up |
+| Participants fall too far behind in Step 2 | Deploy takes long | Share fallback app URL early, don't wait |
+
+---
+
+## If Something Goes Wrong
+
+**Nuclear option:** Pre-build and deploy the agent yourself before the session.
+Share the single URL. Everyone can do Steps 3-5 using the shared agent.
+Steps 1-2 become a walkthrough/demo instead of hands-on.
+The eval/fix lifecycle (Steps 4-5) is the core learning — protect that at all cost.
+
+---
+
+*Instructor version: 1.0 | For questions: contact the AI Platform team*

@@ -1,0 +1,42 @@
+bundle:
+  name: cs-agent-workshop
+
+variables:
+  catalog:
+    description: "Workshop catalog"
+    default: "{{CATALOG}}"
+  schema:
+    description: "Workshop schema (per-user)"
+    default: "{{SCHEMA}}"
+  user_email:
+    description: "Deploying user email"
+    default: "{{USER}}"
+
+targets:
+  default:
+    mode: development
+    default: true
+
+resources:
+  apps:
+    techmart_cs_agent:
+      name: "cs-agent-${var.user_email}"
+      description: "TechMart Customer Support Agent"
+      source_code_path: .
+      config:
+        command:
+          - uvicorn
+          - agent:app
+          - "--host"
+          - "0.0.0.0"
+          - "--port"
+          - "${DATABRICKS_APP_PORT}"
+        env:
+          - name: WORKSHOP_CATALOG
+            value: "${var.catalog}"
+          - name: WORKSHOP_SCHEMA
+            value: "${var.schema}"
+          - name: LLM_ENDPOINT
+            value: "databricks-claude-sonnet-4-7"
+          - name: MLFLOW_EXPERIMENT
+            value: "/Users/${var.user_email}/cs-agent-workshop"
