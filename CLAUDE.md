@@ -218,7 +218,10 @@ import os, logging
 from typing import AsyncGenerator
 
 import mlflow
-from databricks_langchain import ChatDatabricks, DatabricksMCPServer, DatabricksMultiServerMCPClient, AsyncCheckpointSaver
+from databricks_langchain import (
+    ChatDatabricks, DatabricksMCPServer, DatabricksMultiServerMCPClient,
+    AsyncCheckpointSaver,
+)
 from langgraph.prebuilt import create_react_agent
 from mlflow.genai.agent_server import invoke, stream
 from mlflow.types.responses import (
@@ -231,8 +234,7 @@ log = logging.getLogger(__name__)
 CATALOG  = os.environ.get("WORKSHOP_CATALOG", "{{CATALOG}}")
 SCHEMA   = os.environ.get("WORKSHOP_SCHEMA",  "{{SCHEMA}}")
 LLM      = os.environ.get("LLM_ENDPOINT",     "databricks-claude-sonnet-4-6")
-LAKEBASE = os.environ.get("LAKEBASE_INSTANCE_NAME", "")
-HOST     = os.environ.get("DATABRICKS_HOST", "")
+LAKEBASE = os.environ.get("LAKEBASE_INSTANCE_NAME", "{{LAKEBASE}}")
 
 # ── Intentionally minimal system prompt — no guardrails ──────────────────────
 SYSTEM_PROMPT = f"""You are a helpful customer support agent for TechMart, a technology retailer.
@@ -266,14 +268,22 @@ async def streaming(request: ResponsesAgentRequest) -> AsyncGenerator[ResponsesA
     tools = await uc_mcp_client.get_tools()
     agent = create_react_agent(model=model, tools=tools, prompt=SYSTEM_PROMPT)
 
-    async with AsyncCheckpointSaver(instance_name=LAKEBASE) as checkpointer:
-        runnable = agent.with_config(checkpointer=checkpointer)
-        config   = {"configurable": {"thread_id": thread_id}}
-        async for event in process_agent_astream_events(
-            runnable.astream({"messages": messages}, config,
-                             stream_mode=["updates", "messages"])
-        ):
-            yield event
+    # Lakebase checkpointing for conversation memory.
+    # Falls back to stateless if unavailable (e.g. running locally).
+    checkpointer = None
+    config: dict = {}
+    try:
+        checkpointer = await AsyncCheckpointSaver(instance_name=LAKEBASE).__aenter__()
+        config = {"configurable": {"thread_id": thread_id}}
+    except Exception as e:
+        log.warning("Lakebase unavailable (%s) — running stateless.", e)
+
+    runnable = agent.with_config(checkpointer=checkpointer) if checkpointer else agent
+    async for event in process_agent_astream_events(
+        runnable.astream({"messages": messages}, config,
+                         stream_mode=["updates", "messages"])
+    ):
+        yield event
 ```
 
 **File: `agent_server/utils.py`** — copy from the reference repo (handles message conversion and stream event processing)
@@ -469,10 +479,9 @@ eval dataset and judges in Step 4.
 Run this to generate 25 scripted conversations and record them as MLflow traces:
 
 ```bash
-python scripts/generate_traces.py \
-  --app-url https://<your-app-url> \
-  --token $DATABRICKS_TOKEN \
-  --experiment-name "/Users/{{USER}}/cs-agent-workshop"
+cd agent
+uv run python ../scripts/generate_traces.py \
+  --experiment "/Users/{{USER}}/cs-agent-workshop"
 ```
 
 Then open **Databricks → Experiments → cs-agent-workshop** and browse the traces.
@@ -662,15 +671,16 @@ SET product_doc = REGEXP_REPLACE(
 )
 WHERE product_doc LIKE '%DO NOT MISS OUT%';
 
--- Fix discontinued product docs
-UPDATE {{CATALOG}}.{{SCHEMA}}.product_docs pd
-JOIN {{CATALOG}}.{{SCHEMA}}.products p ON pd.product_id = p.product_id
-SET pd.product_doc = REGEXP_REPLACE(
-    pd.product_doc,
+-- Fix discontinued product docs (subquery form — Databricks doesn't support UPDATE...JOIN)
+UPDATE {{CATALOG}}.{{SCHEMA}}.product_docs
+SET product_doc = REGEXP_REPLACE(
+    product_doc,
     'This product is currently in stock and available for immediate purchase[^.]+\\.',
     'Note: This product has been discontinued and is no longer available for purchase.'
 )
-WHERE p.discontinued = true;
+WHERE product_id IN (
+    SELECT product_id FROM {{CATALOG}}.{{SCHEMA}}.products WHERE discontinued = true
+);
 ```
 
 After the data fix, trigger a vector search index refresh:
@@ -689,7 +699,7 @@ After making your changes:
 databricks bundle deploy
 databricks bundle run cs_agent_workshop
 
-# Then re-test
+# Re-test after fix
 TOKEN=$(databricks auth token | jq -r .access_token)
 curl -X POST "https://<your-app-url>/invocations" \
   -H "Authorization: Bearer $TOKEN" \
@@ -737,10 +747,13 @@ print(results)
 
 ### If MCP tool calls fail with permission error
 ```sql
--- Grant execute on all UC functions in the schema to the app service principal
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA {{CATALOG}}.{{SCHEMA}}
-  TO `<your-app-service-principal>`;
--- Find SP name with: databricks apps get cs-agent-{{USERNAME}}-dev --output json | jq .service_principal_name
+-- Find your app service principal name first:
+-- databricks apps get cs-agent-{{USERNAME}}-dev --output json | jq .service_principal_client_id
+-- Then grant execute on each UC function individually (Databricks SQL doesn't support ALL FUNCTIONS):
+GRANT EXECUTE ON FUNCTION {{CATALOG}}.{{SCHEMA}}.product_lookup TO `<sp-client-id>`;
+GRANT EXECUTE ON FUNCTION {{CATALOG}}.{{SCHEMA}}.get_product_details TO `<sp-client-id>`;
+GRANT EXECUTE ON FUNCTION {{CATALOG}}.{{SCHEMA}}.get_order_status TO `<sp-client-id>`;
+GRANT EXECUTE ON FUNCTION {{CATALOG}}.{{SCHEMA}}.get_return_policy TO `<sp-client-id>`;
 ```
 
 ### If app crashes at startup
