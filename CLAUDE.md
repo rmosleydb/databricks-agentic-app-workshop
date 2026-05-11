@@ -218,7 +218,7 @@ import os, logging
 from typing import AsyncGenerator
 
 import mlflow
-from databricks_langchain import ChatDatabricks, DatabricksMCPServer, AsyncCheckpointSaver
+from databricks_langchain import ChatDatabricks, DatabricksMCPServer, DatabricksMultiServerMCPClient, AsyncCheckpointSaver
 from langgraph.prebuilt import create_react_agent
 from mlflow.genai.agent_server import invoke, stream
 from mlflow.types.responses import (
@@ -230,7 +230,7 @@ log = logging.getLogger(__name__)
 
 CATALOG  = os.environ.get("WORKSHOP_CATALOG", "{{CATALOG}}")
 SCHEMA   = os.environ.get("WORKSHOP_SCHEMA",  "{{SCHEMA}}")
-LLM      = os.environ.get("LLM_ENDPOINT",     "databricks-claude-sonnet-4-7")
+LLM      = os.environ.get("LLM_ENDPOINT",     "databricks-claude-sonnet-4-6")
 LAKEBASE = os.environ.get("LAKEBASE_INSTANCE_NAME", "")
 HOST     = os.environ.get("DATABRICKS_HOST", "")
 
@@ -240,11 +240,11 @@ You assist customers with products, orders, returns, and policies.
 Use your tools to look up accurate information. Catalog: {CATALOG}.{SCHEMA}
 """
 
-# UC functions exposed as MCP tools — no SDK imports, no toolkit wrappers
-uc_mcp = DatabricksMCPServer(
-    url=f"{HOST}/api/2.0/mcp/functions/{CATALOG}/{SCHEMA}",
-    name="techmart_tools",
+# UC functions exposed as MCP tools
+uc_mcp_server = DatabricksMCPServer.from_uc_function(
+    catalog=CATALOG, schema=SCHEMA, name="techmart_tools",
 )
+uc_mcp_client = DatabricksMultiServerMCPClient([uc_mcp_server])
 
 model = ChatDatabricks(endpoint=LLM)
 
@@ -263,7 +263,7 @@ async def streaming(request: ResponsesAgentRequest) -> AsyncGenerator[ResponsesA
     messages, context = get_messages_and_context(request)
     thread_id = context.get("conversation_id", "default")
 
-    tools = await uc_mcp.get_tools()
+    tools = await uc_mcp_client.get_tools()
     agent = create_react_agent(model=model, tools=tools, prompt=SYSTEM_PROMPT)
 
     async with AsyncCheckpointSaver(instance_name=LAKEBASE) as checkpointer:
@@ -350,7 +350,7 @@ resources:
           - name: WORKSHOP_SCHEMA
             value: "{{SCHEMA}}"
           - name: LLM_ENDPOINT
-            value: "databricks-claude-sonnet-4-7"
+            value: "databricks-claude-sonnet-4-6"
           - name: LAKEBASE_INSTANCE_NAME
             value_from: database
       resources:

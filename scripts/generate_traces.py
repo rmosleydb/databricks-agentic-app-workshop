@@ -1,257 +1,179 @@
 """
 Generate Workshop Traces
 ========================
-Sends 25 scripted questions to the deployed agent app and records all
-responses as MLflow traces. Run this AFTER the agent is deployed in Step 3.
+Runs 25 scripted questions directly through the agent and records all
+responses as MLflow traces. Run this from the agent/ directory AFTER
+workspace_setup.py has completed.
 
-The questions are designed to surface the 4 quality issues:
-  - 5 normal questions (should work fine — baseline)
-  - 5 about discontinued products (surfaces hallucination/availability bug)
-  - 5 asking for warranty/spec details (surfaces factual accuracy bug)
-  - 5 from frustrated customers about returns (surfaces policy + tone bugs)
-  - 5 for product recommendations (surfaces aggressive tone bug)
+Traces appear automatically in the MLflow experiment via mlflow.langchain.autolog().
+No running app required — this calls the agent Python code directly.
 
-Usage:
-    python scripts/generate_traces.py \\
-        --app-url https://your-app-url.cloud.databricksapps.com \\
-        --token dapi... \\
-        --experiment-name /Users/you@company.com/cs-agent-workshop
+The questions surface the 4 quality issues baked into the data:
+  5 normal              — baseline, should all work fine
+  5 discontinued        — agent says product is available when it's not
+  5 warranty/factual    — agent cites wrong warranty duration (3yr vs 1yr)
+  5 return/tone         — agent approves out-of-policy returns or uses pushy language
+  5 recommendation/tone — agent uses aggressive sales language ("ACT NOW", etc.)
 
-After running, open MLflow in Databricks to see the traces.
-Then use them to build your eval dataset in Step 4.
+Usage (from repo root):
+    cd agent
+    uv run python ../scripts/generate_traces.py \\
+        --experiment /Users/you@company.com/cs-agent-workshop
+
+MLflow traces land in Databricks automatically (DATABRICKS_HOST must be set).
 """
 
 import argparse
+import asyncio
 import json
-import time
 import logging
-import urllib.request
-import urllib.error
+import os
+import sys
+import time
+
+# ── Make sure agent_server is importable when run from repo root ──────────────
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agent"))
 
 import mlflow
+from mlflow.types.responses import ResponsesAgentRequest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(message)s")
 log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Scripted conversation questions — 25 total
-# ---------------------------------------------------------------------------
+# ── Scripted questions — 25 total, 5 per quality-issue category ──────────────
 SCRIPTED_QUESTIONS = [
-    # --- Normal baseline questions (should all work fine) ---
-    {
-        "category": "normal",
-        "message": "Hi, what are your store hours?",
-    },
-    {
-        "category": "normal",
-        "message": "Can you help me find a good laptop for college students?",
-    },
-    {
-        "category": "normal",
-        "message": "What payment methods do you accept?",
-    },
-    {
-        "category": "normal",
-        "message": "How long does standard shipping usually take?",
-    },
-    {
-        "category": "normal",
-        "message": "Do you offer a student discount program?",
-    },
+    # Normal baseline — should work fine
+    {"category": "normal",
+     "message": "Can you help me find a good laptop for college students?"},
+    {"category": "normal",
+     "message": "What are your shipping options and how long does delivery take?"},
+    {"category": "normal",
+     "message": "Do you offer any student or loyalty discounts?"},
+    {"category": "normal",
+     "message": "How do I track my order once it's shipped?"},
+    {"category": "normal",
+     "message": "What payment methods do you accept online?"},
 
-    # --- Discontinued product questions (should surface availability bug) ---
-    # Note: These reference products that are discontinued=true in the DB
-    # but whose docs were modified to say "currently available"
-    {
-        "category": "discontinued_product",
-        "message": "I'm looking for the TechMart ProBook X500 laptop. Is it still available?",
-    },
-    {
-        "category": "discontinued_product",
-        "message": "Can I order the AudioMax Pro headphones? I saw them on your website last year.",
-    },
-    {
-        "category": "discontinued_product",
-        "message": "My friend recommended the DataPad 3000 tablet. Do you still carry it?",
-    },
-    {
-        "category": "discontinued_product",
-        "message": "Is the UltraCharge PowerBank X still in stock? I need one for travel.",
-    },
-    {
-        "category": "discontinued_product",
-        "message": "Can you check if the SmartHome Hub Elite is available? I want to buy two.",
-    },
+    # Discontinued product — agent should say NOT available, but often doesn't
+    {"category": "discontinued_product",
+     "message": "I'm looking for the TechMart ProBook X500 laptop. Is it still available?"},
+    {"category": "discontinued_product",
+     "message": "Can I order the AudioMax Pro headphones? I saw them last year."},
+    {"category": "discontinued_product",
+     "message": "My friend recommended the DataPad 3000 tablet. Do you still carry it?"},
+    {"category": "discontinued_product",
+     "message": "Is the UltraCharge PowerBank X still in stock? I need one for travel."},
+    {"category": "discontinued_product",
+     "message": "Can you check if the SmartHome Hub Elite is available? I want to buy two."},
 
-    # --- Warranty/spec factual questions (surfaces the wrong-warranty bug) ---
-    {
-        "category": "factual_warranty",
-        "message": "What warranty comes with the headphones you sell? How many years is it?",
-    },
-    {
-        "category": "factual_warranty",
-        "message": "If I buy a laptop, how long is the manufacturer warranty? Is it 1 year or longer?",
-    },
-    {
-        "category": "factual_warranty",
-        "message": "I bought a product 2 years ago and it just broke. Am I still under warranty?",
-    },
-    {
-        "category": "factual_warranty",
-        "message": "Do all your products carry the same warranty, or does it vary by category?",
-    },
-    {
-        "category": "factual_warranty",
-        "message": "I'm comparing your warranty to a competitor. Can you confirm how many years your electronics are covered?",
-    },
+    # Warranty / factual accuracy — answer should be 1 year, not 3
+    {"category": "factual_warranty",
+     "message": "What warranty comes with the headphones you sell? How many years is it?"},
+    {"category": "factual_warranty",
+     "message": "If I buy a laptop, how long is the manufacturer warranty?"},
+    {"category": "factual_warranty",
+     "message": "I bought a product 2 years ago and it just broke. Am I still under warranty?"},
+    {"category": "factual_warranty",
+     "message": "Do all your products carry the same warranty, or does it vary by category?"},
+    {"category": "factual_warranty",
+     "message": "I'm comparing your warranty to a competitor — how many years do you cover?"},
 
-    # --- Frustrated return requests (surfaces policy overreach + tone bug) ---
-    {
-        "category": "return_request",
-        "message": "I bought a laptop 6 months ago and I hate it. I want a full refund.",
-    },
-    {
-        "category": "return_request",
-        "message": "This is completely unacceptable! I bought headphones 45 days ago and one ear stopped working. I DEMAND a replacement!",
-    },
-    {
-        "category": "return_request",
-        "message": "I've been a loyal customer for 10 years. I need to return something I bought 3 months ago, no questions asked.",
-    },
-    {
-        "category": "return_request",
-        "message": "I lost my receipt but I bought this keyboard 2 months ago and it's defective. Can I still return it?",
-    },
-    {
-        "category": "return_request",
-        "message": "My kid opened the box on a tablet I bought as a gift. It's been 5 weeks. Can I still return it unused?",
-    },
+    # Return requests — agent should explain 30-day policy and offer to escalate, not approve
+    {"category": "return_request",
+     "message": "I bought a laptop 6 months ago and I hate it. I want a full refund."},
+    {"category": "return_request",
+     "message": "This is unacceptable! Headphones I bought 45 days ago broke. I DEMAND a replacement!"},
+    {"category": "return_request",
+     "message": "I've been a loyal customer for 10 years. I need to return something I bought 3 months ago."},
+    {"category": "return_request",
+     "message": "I lost my receipt but I bought this keyboard 2 months ago and it's defective."},
+    {"category": "return_request",
+     "message": "My kid opened a tablet I bought as a gift. It's been 5 weeks. Can I still return it?"},
 
-    # --- Product recommendations (surfaces aggressive/pushy tone bug) ---
-    {
-        "category": "recommendation",
-        "message": "I'm not sure what laptop to buy. What would you recommend under $800?",
-    },
-    {
-        "category": "recommendation",
-        "message": "What's your best pair of wireless headphones? I don't have a huge budget.",
-    },
-    {
-        "category": "recommendation",
-        "message": "I'm buying a gift for my dad. He's not very tech savvy. What tablet would you suggest?",
-    },
-    {
-        "category": "recommendation",
-        "message": "Can you compare a few of your premium laptops? I want to make sure I choose the right one.",
-    },
-    {
-        "category": "recommendation",
-        "message": "Should I buy the laptop now or wait to see if there are any sales coming?",
-    },
+    # Product recommendations — response should be professional, not pushy
+    {"category": "recommendation",
+     "message": "I'm not sure what laptop to buy. What would you recommend under $800?"},
+    {"category": "recommendation",
+     "message": "What's your best pair of wireless headphones on a budget?"},
+    {"category": "recommendation",
+     "message": "I'm buying a gift for my dad — he's not tech savvy. What tablet would you suggest?"},
+    {"category": "recommendation",
+     "message": "Can you compare a few of your premium laptops so I can choose the right one?"},
+    {"category": "recommendation",
+     "message": "Should I buy now or wait to see if there are any upcoming sales?"},
 ]
 
 
-def call_agent(app_url: str, token: str, message: str, retries: int = 3) -> str:
-    """Call the agent's /chat endpoint and return the response text."""
-    url = f"{app_url.rstrip('/')}/chat"
-    payload = json.dumps({
-        "message": message,
-        "session_id": f"trace_gen_{int(time.time())}",
-        "conversation_history": [],
-    }).encode()
-    for attempt in range(retries):
-        try:
-            req = urllib.request.Request(
-                url,
-                data=payload,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read())
-                return data.get("response", "")
-        except urllib.error.HTTPError as e:
-            body = e.read().decode()
-            log.warning("HTTP %d on attempt %d: %s", e.code, attempt + 1, body[:200])
-            if attempt == retries - 1:
-                return f"[ERROR: HTTP {e.code}]"
-            time.sleep(2 ** attempt)
-        except Exception as ex:
-            log.warning("Error on attempt %d: %s", attempt + 1, ex)
-            if attempt == retries - 1:
-                return f"[ERROR: {ex}]"
-            time.sleep(2 ** attempt)
-    return "[ERROR: all retries failed]"
+async def run_question(agent_streaming_fn, message: str, thread_id: str) -> str:
+    """Send one message through the agent and return the final text response."""
+    request = ResponsesAgentRequest(
+        input=[{"role": "user", "content": message}],
+        context={"conversation_id": thread_id},
+    )
+    parts = []
+    async for event in agent_streaming_fn(request):
+        t = getattr(event, "type", None)
+        if t == "response.output_text.delta":
+            delta = getattr(event, "delta", "")
+            if delta:
+                parts.append(delta)
+    return "".join(parts).strip() or "[no response]"
 
 
-def main(args):
-    # Set up MLflow
+async def main_async(args):
     mlflow.set_tracking_uri("databricks")
-    mlflow.set_experiment(args.experiment_name)
-    log.info("MLflow experiment: %s", args.experiment_name)
-    log.info("Agent URL: %s", args.app_url)
-    log.info("Sending %d scripted questions...", len(SCRIPTED_QUESTIONS))
+    if args.experiment:
+        mlflow.set_experiment(args.experiment)
+        log.info("MLflow experiment: %s", args.experiment)
+
+    # Import agent here so mlflow.langchain.autolog fires inside the run context
+    mlflow.langchain.autolog(log_traces=True)
+    from agent_server.agent import streaming as agent_streaming  # noqa
+
+    log.info("Sending %d scripted questions through the agent...", len(SCRIPTED_QUESTIONS))
     log.info("")
 
     results = []
     for i, q in enumerate(SCRIPTED_QUESTIONS, 1):
         category = q["category"]
-        message = q["message"]
-        log.info("[%02d/%02d] [%s] %s", i, len(SCRIPTED_QUESTIONS),
-                 category, message[:80])
+        message  = q["message"]
+        thread_id = f"trace_gen_{category}_{i:02d}"
 
-        with mlflow.start_run(
-            run_name=f"trace_gen_{category}_{i:02d}",
-            tags={
-                "workshop_trace": "true",
-                "question_category": category,
-                "question_index": str(i),
-            }
-        ):
-            with mlflow.start_span(name="customer_question") as span:
-                span.set_inputs({"message": message, "category": category})
-                response = call_agent(args.app_url, args.token, message)
-                span.set_outputs({"response": response})
-                mlflow.log_param("category", category)
-                mlflow.log_text(message, "question.txt")
-                mlflow.log_text(response, "response.txt")
+        log.info("[%02d/%02d] [%s] %s", i, len(SCRIPTED_QUESTIONS), category, message[:80])
 
-        log.info("  Response: %s", response[:120].replace("\n", " "))
-        results.append({
-            "category": category,
-            "message": message,
-            "response": response,
-        })
+        try:
+            response = await run_question(agent_streaming, message, thread_id)
+        except Exception as e:
+            log.warning("  Error: %s", e)
+            response = f"[ERROR: {e}]"
 
-        # Small delay to be nice to the endpoint
-        time.sleep(1)
+        log.info("  → %s", response[:120].replace("\n", " "))
+        results.append({"category": category, "message": message, "response": response})
+
+        # Brief pause between calls
+        await asyncio.sleep(0.5)
 
     log.info("")
     log.info("=" * 60)
-    log.info("TRACE GENERATION COMPLETE")
+    log.info("TRACE GENERATION COMPLETE — %d traces", len(results))
     log.info("=" * 60)
-    log.info("  %d traces recorded in MLflow experiment:", len(results))
-    log.info("  %s", args.experiment_name)
-    log.info("")
-    log.info("Next: Open Databricks → Experiments → %s", args.experiment_name)
-    log.info("Review the traces and pick 4-5 interesting ones to build your eval dataset.")
+    log.info("Open Databricks → Experiments → %s", args.experiment or "(default)")
+    log.info("Review traces, pick 4–5 interesting ones, build your eval dataset.")
 
-    # Save a local summary
-    import os
-    os.makedirs("output", exist_ok=True)
-    with open("output/trace_summary.json", "w") as f:
+    os.makedirs(os.path.join(os.path.dirname(__file__), "..", "output"), exist_ok=True)
+    out_path = os.path.join(os.path.dirname(__file__), "..", "output", "trace_summary.json")
+    with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
-    log.info("  Summary saved to output/trace_summary.json")
+    log.info("Summary saved to output/trace_summary.json")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate workshop MLflow traces")
+    parser.add_argument("--experiment", default="",
+                        help="MLflow experiment path, e.g. /Users/you@co.com/cs-agent-workshop")
+    args = parser.parse_args()
+    asyncio.run(main_async(args))
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate workshop traces")
-    parser.add_argument("--app-url", required=True, help="Deployed agent app URL")
-    parser.add_argument("--token", required=True, help="Databricks PAT")
-    parser.add_argument("--experiment-name",
-                        default="/Users/workshop/cs-agent-workshop",
-                        help="MLflow experiment path")
-    args = parser.parse_args()
-    main(args)
+    main()

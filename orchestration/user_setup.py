@@ -126,19 +126,17 @@ def setup_user(args):
     # -------------------------------------------------------------------------
     # Build app.yaml for the user
     # -------------------------------------------------------------------------
-    app_yaml = f"""command: ["uvicorn", "agent:app", "--host", "0.0.0.0", "--port", "${{DATABRICKS_APP_PORT}}"]
+    app_yaml = f"""command: ["uv", "run", "start-server"]
 
 env:
   - name: DATABRICKS_HOST
     valueFrom: workspace_url
-  - name: DATABRICKS_TOKEN
-    valueFrom: current_user_token
   - name: WORKSHOP_CATALOG
     value: "{catalog}"
   - name: WORKSHOP_SCHEMA
     value: "{schema}"
   - name: LLM_ENDPOINT
-    value: "databricks-claude-sonnet-4-7"
+    value: "databricks-claude-sonnet-4-6"
   - name: MLFLOW_EXPERIMENT
     value: "/Users/{email}/cs-agent-workshop"
 """

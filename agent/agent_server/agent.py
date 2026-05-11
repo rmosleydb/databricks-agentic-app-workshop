@@ -10,19 +10,21 @@ Architecture:
   - DatabricksMCPServer for UC Function tools (product_lookup, get_product_details,
     get_order_status, get_return_policy)
   - AsyncCheckpointSaver (Lakebase) for short-term / in-session memory
+    (graceful fallback to stateless if Lakebase is unavailable locally)
   - MLflow tracing via mlflow.langchain.autolog()
   - Served via mlflow.genai.start_server (@invoke / @stream decorators)
 """
 
-import os
 import logging
+import os
 from typing import AsyncGenerator
 
 import mlflow
 from databricks_langchain import (
+    AsyncCheckpointSaver,
     ChatDatabricks,
     DatabricksMCPServer,
-    AsyncCheckpointSaver,
+    DatabricksMultiServerMCPClient,
 )
 from langgraph.prebuilt import create_react_agent
 from mlflow.genai.agent_server import invoke, stream
@@ -32,7 +34,7 @@ from mlflow.types.responses import (
     ResponsesAgentStreamEvent,
 )
 
-from agent_server.memory_tools import memory_tools, get_user_id
+from agent_server.memory_tools import get_user_id, memory_tools
 from agent_server.utils import get_messages_and_context, process_agent_astream_events
 
 log = logging.getLogger(__name__)
@@ -40,10 +42,10 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-CATALOG        = os.environ.get("WORKSHOP_CATALOG", "robert_mosley")
-SCHEMA         = os.environ.get("WORKSHOP_SCHEMA",  "cs_workshop")
-LLM_ENDPOINT   = os.environ.get("LLM_ENDPOINT",     "databricks-claude-sonnet-4-7")
-LAKEBASE_INSTANCE = os.environ.get("LAKEBASE_INSTANCE_NAME", "agent-pdpa-st-mem")
+CATALOG           = os.environ.get("WORKSHOP_CATALOG", "robert_mosley")
+SCHEMA            = os.environ.get("WORKSHOP_SCHEMA",  "cs_workshop")
+LLM_ENDPOINT      = os.environ.get("LLM_ENDPOINT",     "databricks-claude-sonnet-4-6")
+LAKEBASE_INSTANCE = os.environ.get("LAKEBASE_INSTANCE_NAME", "cs-agent-workshop-memory")
 DATABRICKS_HOST   = os.environ.get("DATABRICKS_HOST", "")
 
 # ---------------------------------------------------------------------------
@@ -67,13 +69,13 @@ When answering questions:
 Always be helpful. The customer catalog is: {CATALOG}.{SCHEMA}
 """
 
-# ---------------------------------------------------------------------------
-# MCP tool source — UC functions as MCP tools
-# ---------------------------------------------------------------------------
-uc_mcp = DatabricksMCPServer(
-    url=f"{DATABRICKS_HOST}/api/2.0/mcp/functions/{CATALOG}/{SCHEMA}",
+# MCP tool source — UC functions exposed via DatabricksMultiServerMCPClient
+uc_mcp_server = DatabricksMCPServer.from_uc_function(
+    catalog=CATALOG,
+    schema=SCHEMA,
     name="techmart_tools",
 )
+uc_mcp_client = DatabricksMultiServerMCPClient([uc_mcp_server])
 
 model = ChatDatabricks(endpoint=LLM_ENDPOINT)
 
@@ -110,22 +112,41 @@ async def streaming(
     thread_id = (context.get("conversation_id") or user_id or "default")
 
     # UC function tools via MCP + memory tools
-    uc_tools = await uc_mcp.get_tools()
+    uc_tools  = await uc_mcp_client.get_tools()
     all_tools = uc_tools + memory_tools()
 
-    async with AsyncCheckpointSaver(instance_name=LAKEBASE_INSTANCE) as checkpointer:
-        agent = await init_agent(all_tools)
-
-        runnable = agent.with_config(checkpointer=checkpointer)
-
+    # Try to use Lakebase checkpointing for conversation memory.
+    # Falls back to stateless if Lakebase is unavailable (e.g. running locally
+    # where the caller's Databricks identity hasn't been provisioned as a
+    # Postgres role on the shared instance).
+    checkpointer = None
+    config: dict = {}
+    try:
+        checkpointer = await AsyncCheckpointSaver(
+            instance_name=LAKEBASE_INSTANCE
+        ).__aenter__()
         config = {
             "configurable": {
                 "thread_id": thread_id,
                 "user_id": user_id,
             }
         }
+        log.debug("Lakebase checkpointer active (thread_id=%s)", thread_id)
+    except Exception as e:
+        log.warning(
+            "AsyncCheckpointSaver unavailable (%s) — running stateless. "
+            "This is normal when running locally without a provisioned Postgres role.",
+            e,
+        )
 
-        async for event in process_agent_astream_events(
-            runnable.astream({"messages": messages}, config, stream_mode=["updates", "messages"])
-        ):
-            yield event
+    agent = await init_agent(all_tools)
+
+    if checkpointer is not None:
+        runnable = agent.with_config(checkpointer=checkpointer)
+    else:
+        runnable = agent
+
+    async for event in process_agent_astream_events(
+        runnable.astream({"messages": messages}, config, stream_mode=["updates", "messages"])
+    ):
+        yield event
