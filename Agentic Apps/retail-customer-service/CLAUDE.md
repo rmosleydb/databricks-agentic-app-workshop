@@ -47,7 +47,7 @@ throughout the lab — they are live values, not placeholders.
   Your schema:    {{CATALOG}}.{{SCHEMA}}
                   — YOUR personal space. This is where you create UC Functions
                     and store your agent artifacts. No one else writes here.
-  Lakebase:       given by instructor
+  Lakebase:       {{LAKEBASE_INSTANCE}}
                   — shared PostgreSQL instance for all participants, isolated
                     per conversation by thread_id
   VS Index:       {{CATALOG}}.shared.product_docs_vs

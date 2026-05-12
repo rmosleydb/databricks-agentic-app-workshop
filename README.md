@@ -22,7 +22,7 @@ databricks-agentic-app-workshop/
         ├── lab.yml                    <- Machine-readable lab metadata
         ├── setup/
         │   ├── workspace_setup.py     <- Instructor: run once per cohort
-        │   └── user_setup.py          <- Instructor: run once per participant
+        │   └── user_setup.py          <- Participant: run once at self-onboarding
         ├── reference/
         │   ├── agent/                 <- Complete working implementation
         │   │   ├── agent_server/      <- LangGraph agent + server code
@@ -68,8 +68,9 @@ Difficulty: intermediate
 Before the workshop, run workspace_setup.py once to create the shared
 Unity Catalog objects, Vector Search index, and MLflow experiment.
 
-For each participant, run user_setup.py to generate their personal
-CLAUDE.md with live workspace values injected.
+user_setup.py is now participant-triggered: each attendee runs it themselves
+via Claude Code during self-onboarding. It generates their personal CLAUDE.md
+with live workspace values injected (catalog, schema, Lakebase instance, etc.).
 
 See `Agentic Apps/retail-customer-service/docs/instructor_guide.md` for
 full facilitation notes, timing guidance, and debrief talking points.

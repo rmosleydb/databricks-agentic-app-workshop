@@ -5,7 +5,7 @@ Ask immediately, no preamble:
 "Are you an admin setting up the workshop, or a participant working through a lab?"
 
 - Admin / Instructor -> Admin section below
-- Participant -> Scenario Menu below
+- Participant -> Participant Self-Onboarding below, then Scenario Menu
 - Unsure -> ask which lab scenario and route from there
 
 ---
@@ -30,10 +30,11 @@ Then show the command and confirm before running it the first time:
 Fixed values: shared schema is always 'shared', VS endpoint is 'cs-workshop-vs-endpoint'.
 workspace_setup.py is idempotent — safe to re-run at any time.
 
-### Onboarding a participant
+### Onboarding a participant (admin-initiated)
 
 One participant at a time as they arrive. When admin says "onboard a participant"
-or "add a user", ask for the participant's email address, then run:
+or "add a user", ask for the participant's email address, workspace URL, and token,
+then run:
 
   python 'Agentic Apps/retail-customer-service/setup/user_setup.py' \
     --workspace-url <url> \
@@ -49,6 +50,18 @@ Schema derivation rule:
 App name convention: cs-agent-<username> (must be unique per participant to avoid collisions).
 
 Tell the admin the derived schema name and app name after each onboarding run.
+
+### Deploy reference implementation (setup step)
+
+When admin says "deploy the reference implementation" as a setup step (not emergency),
+Claude steps:
+1. Navigate to: Agentic Apps/retail-customer-service/reference/agent/
+2. Run: databricks bundle deploy --target dev
+3. Run: databricks bundle run cs_agent_workshop
+4. Report the app URL back to the admin.
+
+This is the normal pre-workshop deploy flow. For emergency per-participant deploys
+when a participant's build is broken, see Nuclear option below.
 
 ### Nuclear option — deploy reference implementation
 
@@ -72,6 +85,35 @@ workspace_setup.py does not need to be re-run for a single participant reset.
 - Per-user schema: derived from email username (see derivation rule above)
 - Per-user app name: cs-agent-<username> (unique per participant)
 - VS endpoint: cs-workshop-vs-endpoint
+
+---
+
+## Participant Self-Onboarding
+
+When a participant opens Claude, automatically run their onboarding before moving
+to the lab. Do not wait for them to ask — proceed through these steps:
+
+1. Ask: "What is your email address?"
+2. Ask: "What is your Databricks workspace URL?
+   (e.g. https://adb-1234567890.azuredatabricks.net)"
+3. Ask: "What is your Databricks personal access token?"
+4. Run:
+
+  python 'Agentic Apps/retail-customer-service/setup/user_setup.py' \
+    --workspace-url <url> \
+    --user-email <email> \
+    --token <token> \
+    --catalog workshop_catalog
+
+5. Derive their schema name and app name using the schema derivation rule:
+     jsmith@company.com       -> schema: jsmith,    app: cs-agent-jsmith
+     first.last@company.com   -> schema: first_last, app: cs-agent-first_last
+   (strip domain, replace dots with underscores)
+
+6. Tell the participant:
+   "Your setup is complete. Your schema is <schema> and your app name is <app-name>."
+
+After onboarding completes, proceed to the Scenario Menu below.
 
 ---
 

@@ -38,6 +38,23 @@ LAKEBASE_INSTANCE_NAME=cs-agent-workshop-memory
 
 These values are injected into each participant's CLAUDE.md by user_setup.py. Claude uses them automatically when building the agent.
 
+### T-24 hours: Deploy the reference implementation
+
+After workspace setup completes, tell Claude: "Deploy the reference implementation"
+
+Claude will navigate to reference/agent/, then run:
+
+```bash
+databricks bundle deploy --target dev
+databricks bundle run --target dev
+```
+
+Note the app URL printed at the end. This URL serves two purposes:
+- It is your fallback URL for participants who get stuck on deployment (share it so they can continue with Steps 3-5)
+- It validates that the full setup works end-to-end in this workspace
+
+If this step fails, something is wrong with the environment — diagnose and fix before the session. Do not skip this step and hope for the best.
+
 ### 15 min before: Verify infrastructure
 
 Run these checks yourself before participants arrive:
@@ -69,6 +86,13 @@ inst = w.database.get_database_instance('cs-agent-workshop-memory')
 print(inst.name, inst.state)
 "
 # Expected: cs-agent-workshop-memory DatabaseInstanceState.AVAILABLE
+
+# 5. Reference app responds
+curl -s -X POST "<reference-app-url>/invocations" \
+  -H "Authorization: Bearer $(databricks auth token --profile <profile> | jq -r .access_token)" \
+  -H "Content-Type: application/json" \
+  -d '{"input": [{"role": "user", "content": "What products do you sell?"}]}'
+# Expected: JSON response with assistant message
 ```
 
 ### Have ready on your screen:
@@ -232,7 +256,7 @@ That's how you put an agent in production and keep it there."
 
 ## If Something Goes Wrong
 
-**Nuclear option:** Tell Claude to deploy the reference implementation. Say: "Deploy the reference implementation for [participant email]". Claude will navigate to reference/agent/, derive the username from the email, and run databricks bundle deploy. The participant can then use Steps 3-5 with a working agent.
+**Nuclear option:** Share the reference app URL (deployed in Step A3) with the participant. They can use Steps 3-5 with the shared app.
 
 ---
 

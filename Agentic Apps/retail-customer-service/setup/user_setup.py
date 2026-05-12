@@ -1,7 +1,7 @@
 """
 User Setup Script
 =================
-Run ONCE per attendee, typically triggered by the workshop provisioning system.
+Run ONCE per attendee. Participants trigger this themselves via Claude Code during self-onboarding.
 
 What this script does:
   1. Creates a per-user schema under the workshop catalog
@@ -119,6 +119,7 @@ def setup_user(args):
         "{{USER}}": email,
         "{{USERNAME}}": username,
         "{{WORKSPACE_URL}}": workspace_url,
+        "{{LAKEBASE_INSTANCE}}": args.lakebase_name,
     }
     for placeholder, value in replacements.items():
         claude_md = claude_md.replace(placeholder, value)
@@ -189,6 +190,8 @@ if __name__ == "__main__":
                         help="Workshop catalog name")
     parser.add_argument("--schema", default=None,
                         help="Workshop schema name (derived from email if not set)")
+    parser.add_argument("--lakebase-name", default="cs-agent-workshop-memory",
+                        help="Lakebase instance name for conversation memory")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print what would happen without making changes")
     args = parser.parse_args()
