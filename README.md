@@ -14,7 +14,8 @@ production-ready AI application — with full quality measurement along the way.
 databricks-agentic-app-workshop/
 ├── CLAUDE.md                          <- AI assistant router (start here)
 ├── skills/
-│   └── agentic-app-best-practices.md  <- Universal patterns reference
+│   ├── agentic-app-best-practices.md  <- Universal patterns reference
+│   └── mlflow-agent-evaluation-lifecycle.md  <- MLflow eval & tracing patterns
 └── Agentic Apps/
     └── retail-customer-service/       <- Scenario 1
         ├── CLAUDE.md                  <- AI lab partner guide (no spoilers)
@@ -68,7 +69,7 @@ Before the workshop, run workspace_setup.py once to create the shared
 Unity Catalog objects, Vector Search index, and MLflow experiment.
 
 For each participant, run user_setup.py to generate their personal
-databricks.yml and app.yaml with the correct catalog, schema, and username.
+CLAUDE.md with live workspace values injected.
 
 See `Agentic Apps/retail-customer-service/docs/instructor_guide.md` for
 full facilitation notes, timing guidance, and debrief talking points.
@@ -78,11 +79,14 @@ Quick start:
 ```bash
 # Set up the workspace (once per cohort)
 python "Agentic Apps/retail-customer-service/setup/workspace_setup.py" \
-  --catalog my_catalog --schema my_schema --profile my_profile
+  --profile my_profile --workshop-catalog my_catalog
 
 # Onboard a participant
 python "Agentic Apps/retail-customer-service/setup/user_setup.py" \
-  --user alice@company.com --catalog my_catalog --schema my_schema
+  --workspace-url https://adb-xxxx.azuredatabricks.net \
+  --user-email alice@company.com \
+  --token my_token \
+  --catalog my_catalog
 ```
 
 ---

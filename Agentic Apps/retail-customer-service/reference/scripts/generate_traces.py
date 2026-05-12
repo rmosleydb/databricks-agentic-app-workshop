@@ -2,8 +2,7 @@
 Generate Workshop Traces
 ========================
 Runs 25 scripted questions directly through the agent and records all
-responses as MLflow traces. Run this from the agent/ directory AFTER
-workspace_setup.py has completed.
+responses as MLflow traces. Run this after deploying your agent in Step 2.
 
 Traces appear automatically in the MLflow experiment via mlflow.langchain.autolog().
 No running app required — this calls the agent Python code directly.
@@ -18,7 +17,7 @@ The questions surface the 4 quality issues baked into the data:
 Usage (from the reference/agent directory):
     cd "Agentic Apps/retail-customer-service/reference/agent"
     uv run python ../scripts/generate_traces.py \\
-        --experiment /Users/you@company.com/cs-agent-workshop
+        --experiment /Users/<your-email>/cs-agent-workshop
 
 MLflow traces land in Databricks automatically (DATABRICKS_HOST must be set).
 """
@@ -169,8 +168,8 @@ async def main_async(args):
 
 def main():
     parser = argparse.ArgumentParser(description="Generate workshop MLflow traces")
-    parser.add_argument("--experiment", default="",
-                        help="MLflow experiment path, e.g. /Users/you@co.com/cs-agent-workshop")
+    parser.add_argument("--experiment", default=None, required=True,
+                        help="MLflow experiment path, e.g. /Users/you@company.com/cs-agent-workshop")
     args = parser.parse_args()
     asyncio.run(main_async(args))
 

@@ -10,15 +10,14 @@ The three judges target the quality issues baked into the workshop data:
   3. policy_compliance — does the agent stay within return policy bounds?
 
 Usage:
-    # Interactive — guided by Claude in Coda:
-    # "Run create_judges.py on my eval dataset"
+    # Interactive — ask Claude: "Run create_judges.py on my eval dataset"
 
     # Direct:
     python scripts/create_judges.py \\
-        --experiment-name /Users/you@company.com/cs-agent-workshop \\
+        --experiment-name /Users/<your-email>/cs-agent-workshop \\\
         --dataset-name my_eval_dataset \\
-        --catalog workshop_catalog \\
-        --schema my_schema
+        --catalog <your-workshop-catalog> \\
+        --schema <your-schema>
 
 The script:
   1. Loads your eval dataset from Unity Catalog (or creates a minimal one for demo)
@@ -84,12 +83,12 @@ POLICY_COMPLIANCE = Guidelines(
 ALL_JUDGES = [FACTUAL_ACCURACY, TONE_QUALITY, POLICY_COMPLIANCE]
 
 
-def load_dataset_from_uc(catalog: str, schema: str, dataset_name: str) -> pd.DataFrame:
+def load_dataset_from_uc(catalog: str, schema: str, dataset_name: str, experiment_name: str = None) -> pd.DataFrame:
     """Load eval dataset from Unity Catalog MLflow dataset."""
     try:
         client = mlflow.MlflowClient()
         # List datasets registered in the experiment
-        experiment = mlflow.get_experiment_by_name(f"/Users/{os.environ.get('USER', 'workshop')}/cs-agent-workshop")
+        experiment = mlflow.get_experiment_by_name(experiment_name)
         if experiment:
             runs = client.search_runs(
                 experiment_ids=[experiment.experiment_id],
@@ -193,7 +192,7 @@ def run_evaluation(args):
     log.info("Loading eval dataset...")
     df = None
     if args.dataset_name:
-        df = load_dataset_from_uc(args.catalog, args.schema, args.dataset_name)
+        df = load_dataset_from_uc(args.catalog, args.schema, args.dataset_name, args.experiment_name)
 
     if df is None:
         log.info("  No dataset found — using demonstration dataset with 5 examples.")
@@ -239,12 +238,12 @@ def run_evaluation(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run agent evaluation with LLM judges")
-    parser.add_argument("--experiment-name", default="/Users/workshop/cs-agent-workshop",
-                        help="MLflow experiment path")
-    parser.add_argument("--catalog", default="workshop_catalog",
-                        help="Unity Catalog catalog name")
-    parser.add_argument("--schema", default=None,
-                        help="Unity Catalog schema name")
+    parser.add_argument("--experiment-name", default=None, required=True,
+                        help="MLflow experiment path, e.g. /Users/you@company.com/cs-agent-workshop")
+    parser.add_argument("--catalog", default=None, required=True,
+                        help="Unity Catalog catalog name (e.g. workshop_catalog)")
+    parser.add_argument("--schema", default=None, required=True,
+                        help="Unity Catalog schema name (e.g. your personal schema)")
     parser.add_argument("--dataset-name", default=None,
                         help="Eval dataset name (if already created)")
     args = parser.parse_args()
