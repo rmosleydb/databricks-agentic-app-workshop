@@ -5,19 +5,21 @@ Run ONCE before the workshop to prepare the shared Databricks environment.
 
 What this script does:
   1. Creates the workshop catalog and schema
-  2. Copies all tables from the source catalog (robert_mosley.customer_support)
+  2. Copies all tables from the source catalog into the 'shared' schema
   3. Injects intentional quality bugs into product_docs for the workshop scenario
   4. Creates or verifies the vector search endpoint and delta-sync index
-  5. Creates UC Functions participants will use as agent tools
-  6. Grants permissions to all workspace users
-  7. Provisions a shared Lakebase instance for agent conversation memory
+  5. Grants permissions to all workspace users (USE CATALOG, USE SCHEMA, SELECT,
+     CREATE SCHEMA so each participant can create their own schema)
+  6. Provisions a shared Lakebase instance for agent conversation memory
      (all participants share one instance; conversations are isolated by thread_id)
+
+Participants create their own UC Functions during the workshop as part of the lab.
 
 Usage:
     python "Agentic Apps/retail-customer-service/setup/workspace_setup.py" \\
         --profile ai-specialist \\
         --workshop-catalog workshop_catalog \\
-        --workshop-schema customer_support_workshop \\
+        --workshop-schema shared \\
         --source-catalog robert_mosley \\
         --source-schema customer_support \\
         --lakebase-name cs-agent-workshop-memory
@@ -25,8 +27,9 @@ Usage:
 The script is idempotent — safe to re-run. The Lakebase instance creation
 takes ~5 minutes on first run; subsequent runs skip it if it already exists.
 
-After running, give participants the printed WORKSHOP_CATALOG, WORKSHOP_SCHEMA,
-and LAKEBASE_INSTANCE_NAME values to put in their databricks.yml before deploying.
+After running, give participants the printed WORKSHOP_CATALOG and
+LAKEBASE_INSTANCE_NAME values. Each participant will create their own schema
+under WORKSHOP_CATALOG. Participants then tell Claude to set up their workspace.
 """
 
 import argparse
@@ -105,12 +108,12 @@ def setup(args):
     # -------------------------------------------------------------------------
     # 1. Create catalog and schema
     # -------------------------------------------------------------------------
-    log.info("Step 1: Creating catalog and schema...")
+    log.info("Step 1: Creating catalog and shared schema...")
     sql(w, wh, f"CREATE CATALOG IF NOT EXISTS `{cat}`",
         f"create catalog {cat}")
     sql(w, wh, f"USE CATALOG `{cat}`", "use catalog")
     sql(w, wh, f"CREATE SCHEMA IF NOT EXISTS `{cat}`.`{schema}`",
-        f"create schema {schema}")
+        f"create shared schema {schema}")
 
     # -------------------------------------------------------------------------
     # 2. Copy source tables
@@ -341,120 +344,14 @@ def setup(args):
         log.info("  VS index ready.")
 
     # -------------------------------------------------------------------------
-    # 5. Create UC Functions
+    # 5. Grant permissions
     # -------------------------------------------------------------------------
-    log.info("Step 5: Creating UC Functions...")
-
-    # product_lookup — calls the vector search index
-    # Note: vector_search() requires num_results to be a constant literal
-    # The result column is search_score (not score)
-    sql(w, wh, f"""
-        CREATE OR REPLACE FUNCTION `{cat}`.`{schema}`.`product_lookup`(
-            query STRING COMMENT 'Natural language search query about a product'
-        )
-        RETURNS TABLE (
-            product_id STRING,
-            product_name STRING,
-            product_category STRING,
-            product_doc STRING,
-            search_score DOUBLE
-        )
-        COMMENT 'Search TechMart product documentation using semantic search'
-        RETURN
-            SELECT
-                product_id,
-                product_name,
-                product_category,
-                product_doc,
-                search_score
-            FROM vector_search(
-                index => '{index_name}',
-                query => query,
-                num_results => 3
-            )
-    """, "create product_lookup function")
-
-    # get_product_details — direct lookup by name
-    sql(w, wh, f"""
-        CREATE OR REPLACE FUNCTION `{cat}`.`{schema}`.`get_product_details`(
-            product_name_query STRING COMMENT 'Product name or partial name to look up'
-        )
-        RETURNS TABLE (
-            product_id STRING,
-            product_name STRING,
-            product_category STRING,
-            product_sub_category STRING,
-            unit_price DECIMAL(10,2),
-            units_in_stock INT,
-            discontinued BOOLEAN,
-            last_restocked_at TIMESTAMP
-        )
-        COMMENT 'Get product inventory details by name'
-        RETURN
-            SELECT
-                product_id,
-                product_name,
-                product_category,
-                product_sub_category,
-                unit_price,
-                units_in_stock,
-                discontinued,
-                last_restocked_at
-            FROM `{cat}`.`{schema}`.`products`
-            WHERE LOWER(product_name) LIKE LOWER(CONCAT('%', product_name_query, '%'))
-            LIMIT 5
-    """, "create get_product_details function")
-
-    # get_order_status — join orders + customers
-    sql(w, wh, f"""
-        CREATE OR REPLACE FUNCTION `{cat}`.`{schema}`.`get_order_status`(
-            order_id_param STRING COMMENT 'The order ID to look up'
-        )
-        RETURNS TABLE (
-            order_id STRING,
-            customer_name STRING,
-            order_date TIMESTAMP,
-            shipped_date TIMESTAMP,
-            status STRING,
-            ship_via STRING
-        )
-        COMMENT 'Get order status and shipping information by order ID'
-        RETURN
-            SELECT
-                o.order_id,
-                c.contact_name as customer_name,
-                o.order_date,
-                o.shipped_date,
-                o.status,
-                o.ship_via
-            FROM `{cat}`.`{schema}`.`orders` o
-            LEFT JOIN `{cat}`.`{schema}`.`customers` c ON o.customer_id = c.customer_id
-            WHERE o.order_id = order_id_param
-    """, "create get_order_status function")
-
-    # get_return_policy — returns policy table content
-    sql(w, wh, f"""
-        CREATE OR REPLACE FUNCTION `{cat}`.`{schema}`.`get_return_policy`()
-        RETURNS TABLE (policy STRING, policy_details STRING)
-        COMMENT 'Get TechMart return and warranty policy information'
-        RETURN
-            SELECT policy, policy_details
-            FROM `{cat}`.`{schema}`.`policies`
-            ORDER BY policy
-    """, "create get_return_policy function")
-
-    log.info("  UC Functions created.")
-
-    # -------------------------------------------------------------------------
-    # 6. Grant permissions
-    # -------------------------------------------------------------------------
-    log.info("Step 6: Granting permissions to workspace users...")
+    log.info("Step 5: Granting permissions to workspace users...")
     grant_stmts = [
         f"GRANT USE CATALOG ON CATALOG `{cat}` TO `account users`",
         f"GRANT USE SCHEMA ON SCHEMA `{cat}`.`{schema}` TO `account users`",
         f"GRANT SELECT ON SCHEMA `{cat}`.`{schema}` TO `account users`",
-        f"GRANT CREATE TABLE ON SCHEMA `{cat}`.`{schema}` TO `account users`",
-        f"GRANT CREATE FUNCTION ON SCHEMA `{cat}`.`{schema}` TO `account users`",
+        f"GRANT CREATE SCHEMA ON CATALOG `{cat}` TO `account users`",
     ]
     for stmt in grant_stmts:
         try:
@@ -464,9 +361,9 @@ def setup(args):
     log.info("  Permissions granted.")
 
     # -------------------------------------------------------------------------
-    # 7. Provision shared Lakebase instance (for agent conversation memory)
+    # 6. Provision shared Lakebase instance (for agent conversation memory)
     # -------------------------------------------------------------------------
-    log.info("Step 7: Provisioning shared Lakebase instance for agent memory...")
+    log.info("Step 6: Provisioning shared Lakebase instance for agent memory...")
     lakebase_name = args.lakebase_name
 
     lakebase_instance = None
@@ -503,22 +400,22 @@ def setup(args):
     log.info("WORKSPACE SETUP COMPLETE")
     log.info("=" * 60)
     log.info("  Catalog:        %s", cat)
-    log.info("  Schema:         %s", schema)
+    log.info("  Shared Schema:  %s", schema)
     log.info("  VS Endpoint:    %s", vs_endpoint)
     log.info("  VS Index:       %s", index_name)
-    log.info("  UC Functions:   product_lookup, get_product_details,")
-    log.info("                  get_order_status, get_return_policy")
     log.info("  Lakebase:       %s  (shared by all participants)", lakebase_name)
+    log.info("  Note: Participants will create their own schemas under %s", cat)
     log.info("")
-    log.info("Give participants these values for their databricks.yml:")
+    log.info("Give participants these values:")
     log.info("  WORKSHOP_CATALOG=%s", cat)
-    log.info("  WORKSHOP_SCHEMA=%s", schema)
     log.info("  LAKEBASE_INSTANCE_NAME=%s", lakebase_name)
+    log.info("  (Each participant creates their own schema under the catalog)")
     log.info("")
     log.info("Next steps:")
     log.info("  1. Share the GitHub repo link with participants")
-    log.info("  2. Participants run: databricks bundle deploy && databricks bundle run")
-    log.info("  3. Verify preflight checklist in enablement/instructor_guide.md")
+    log.info("  2. Give participants WORKSHOP_CATALOG and LAKEBASE_INSTANCE_NAME")
+    log.info("  3. Participants tell Claude to set up their workspace")
+    log.info("  4. Verify preflight checklist in enablement/instructor_guide.md")
 
 
 # ---------------------------------------------------------------------------
@@ -535,13 +432,13 @@ if __name__ == "__main__":
                         help="SQL warehouse ID for DDL/DML")
     parser.add_argument("--workshop-catalog", default="workshop_catalog",
                         help="Target catalog to create for the workshop")
-    parser.add_argument("--workshop-schema", default="customer_support_workshop",
+    parser.add_argument("--workshop-schema", default="shared",
                         help="Target schema to create for the workshop")
     parser.add_argument("--source-catalog", default="robert_mosley",
                         help="Source catalog with the original data")
     parser.add_argument("--source-schema", default="customer_support",
                         help="Source schema with the original data")
-    parser.add_argument("--vs-endpoint", default="anthony_ivan_test_vs_endpoint",
+    parser.add_argument("--vs-endpoint", default="cs-workshop-vs-endpoint",
                         help="Vector search endpoint name")
     parser.add_argument("--lakebase-name", default="cs-agent-workshop-memory",
                         help="Name for the shared Lakebase instance (created if it doesn't exist)")

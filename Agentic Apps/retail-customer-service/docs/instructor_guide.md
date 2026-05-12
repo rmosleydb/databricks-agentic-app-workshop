@@ -22,7 +22,7 @@ cd databricks-cs-agent-workshop
 python orchestration/workspace_setup.py \
     --profile <your-databricks-profile> \
     --workshop-catalog <catalog-name> \
-    --workshop-schema cs_workshop \
+    --workshop-schema shared \
     --source-catalog robert_mosley \
     --source-schema customer_support \
     --lakebase-name cs-agent-workshop-memory
@@ -32,12 +32,11 @@ At the end, the script prints three values — **share these with participants**
 
 ```
 WORKSHOP_CATALOG=<catalog-name>
-WORKSHOP_SCHEMA=cs_workshop
+WORKSHOP_SCHEMA=shared
 LAKEBASE_INSTANCE_NAME=cs-agent-workshop-memory
 ```
 
-Participants paste these into their `databricks.yml` in Step 2b. Every participant's app
-connects to the same Lakebase instance; conversations are isolated by `thread_id`.
+These values are injected into each participant's CLAUDE.md by user_setup.py. Claude uses them automatically when building the agent.
 
 ### 15 min before: Verify infrastructure
 
@@ -47,19 +46,20 @@ Run these checks yourself before participants arrive:
 # 1. Tables exist
 databricks tables list \
   --catalog-name <catalog-name> \
-  --schema-name cs_workshop
+  --schema-name shared
 
 # Expected: products, product_docs, customers, orders, order_details, policies
 
 # 2. Vector search index is ONLINE
 databricks vector-search indexes get \
-  <catalog-name>.cs_workshop.product_docs_vs
+  <catalog-name>.shared.product_docs_vs
 
 # Expected: "detailed_state": "ONLINE"
 
-# 3. UC Functions work — run in a notebook:
-# SELECT * FROM <catalog>.cs_workshop.product_lookup('laptop')
-# Expect: rows with product docs
+# 3. Shared schema tables are accessible (UC Functions are created by participants
+#    during the lab — they are not pre-provisioned by workspace_setup.py):
+# SELECT COUNT(*) FROM <catalog-name>.shared.products
+# Expected: > 0 rows
 
 # 4. Lakebase instance is AVAILABLE
 python3 -c "
@@ -84,7 +84,7 @@ print(inst.name, inst.state)
 | Time | Activity | Notes |
 |------|----------|-------|
 | 0:00 | Intro (5 min) | The TechMart story, why this matters |
-| 0:05 | Step 1: Explore (15 min) | SQL queries in notebook. Monitor Slack for stragglers. |
+| 0:05 | Step 1: Explore (15 min) | Unity Catalog UI + SQL Editor. Monitor Slack for stragglers. |
 | 0:20 | Step 2: Build (25 min) | Most time. Monitor: UC Functions, app deployment. |
 | 0:45 | Step 2 check (5 min) | Confirm everyone has a deployed app before moving on |
 | 0:50 | Step 3: Break (10 min) | Fun part — let them poke the agent |
@@ -232,10 +232,7 @@ That's how you put an agent in production and keep it there."
 
 ## If Something Goes Wrong
 
-**Nuclear option:** Pre-build and deploy the agent yourself before the session.
-Share the single URL. Everyone can do Steps 3-5 using the shared agent.
-Steps 1-2 become a walkthrough/demo instead of hands-on.
-The eval/fix lifecycle (Steps 4-5) is the core learning — protect that at all cost.
+**Nuclear option:** Tell Claude to deploy the reference implementation. Say: "Deploy the reference implementation for [participant email]". Claude will navigate to reference/agent/, derive the username from the email, and run databricks bundle deploy. The participant can then use Steps 3-5 with a working agent.
 
 ---
 

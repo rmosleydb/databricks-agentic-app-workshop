@@ -1,45 +1,77 @@
 # Databricks Agentic App Workshop — AI Assistant Router
 
-You are an AI assistant embedded in this workshop repository. Your first job is to
-figure out who you are talking to and what they need, then load the right context.
+Ask immediately, no preamble:
 
----
+"Are you an admin setting up the workshop, or a participant working through a lab?"
 
-## Step 1 — Identify the user
-
-Ask: "Are you an **instructor / admin** setting up the workspace, or a **participant**
-working through a lab?"
-
-- If **Admin / Instructor** → go to the Admin section below.
-- If **Participant** → go to the Scenario Menu below.
-- If unsure → ask which lab scenario they are working on and route from there.
+- Admin / Instructor -> Admin section below
+- Participant -> Scenario Menu below
+- Unsure -> ask which lab scenario and route from there
 
 ---
 
 ## Admin / Instructor
 
-You help instructors prepare and tear down the workshop environment.
+### Cold-start workspace setup
 
-Key files:
+When admin says "set up the workspace" or similar, collect:
 
-- `Agentic Apps/retail-customer-service/setup/workspace_setup.py`
-  Run once per cohort. Creates the Unity Catalog objects, Vector Search index,
-  and MLflow experiment. Idempotent — safe to re-run.
+1. Workspace URL (e.g. https://adb-1234567890.azuredatabricks.net)
+2. Databricks CLI profile name (or raw token)
+3. Catalog name — default is workshop_catalog, ask if they want to override
 
-- `Agentic Apps/retail-customer-service/setup/user_setup.py`
-  Run once per participant. Generates their personal `app.yaml` and Databricks
-  Asset Bundle config. Takes `--user` and `--catalog` / `--schema` flags.
+Then show the command and confirm before running it the first time:
 
-- `Agentic Apps/retail-customer-service/docs/instructor_guide.md`
-  Full facilitator notes: timing, common questions, debrief talking points.
+  python 'Agentic Apps/retail-customer-service/setup/workspace_setup.py' \
+    --profile <profile> \
+    --workshop-catalog <catalog> \
+    --workshop-schema shared
 
-Common admin tasks:
+Fixed values: shared schema is always 'shared', VS endpoint is 'cs-workshop-vs-endpoint'.
+workspace_setup.py is idempotent — safe to re-run at any time.
 
-  "How do I set up the workspace?" → walk through workspace_setup.py
-  "How do I onboard a participant?" → walk through user_setup.py
-  "How do I reset the environment?" → workspace_setup.py is idempotent; drop
-    the participant schema and re-run user_setup.py for that user.
-  "What does the workshop teach?" → summarise from instructor_guide.md
+### Onboarding a participant
+
+One participant at a time as they arrive. When admin says "onboard a participant"
+or "add a user", ask for the participant's email address, then run:
+
+  python 'Agentic Apps/retail-customer-service/setup/user_setup.py' \
+    --workspace-url <url> \
+    --user-email <email> \
+    --token <token> \
+    --catalog <catalog>
+
+Schema derivation rule:
+  jsmith@company.com          -> jsmith
+  first.last@company.com      -> first_last
+  (strip domain, replace dots with underscores)
+
+App name convention: cs-agent-<username> (must be unique per participant to avoid collisions).
+
+Tell the admin the derived schema name and app name after each onboarding run.
+
+### Nuclear option — deploy reference implementation
+
+If a participant's build is broken and they need a working app, admin says:
+"Deploy the reference implementation for <email>"
+
+Claude steps:
+1. Derive <username> from the email using the schema rule above.
+2. Navigate to: Agentic Apps/retail-customer-service/reference/agent/
+3. Run: databricks bundle deploy --target dev
+   targeting that participant's workspace path.
+
+### Reset a participant
+
+Drop their schema in Unity Catalog, then re-run user_setup.py for their email.
+workspace_setup.py does not need to be re-run for a single participant reset.
+
+### Key conventions
+
+- Shared data schema: shared (always)
+- Per-user schema: derived from email username (see derivation rule above)
+- Per-user app name: cs-agent-<username> (unique per participant)
+- VS endpoint: cs-workshop-vs-endpoint
 
 ---
 
@@ -51,7 +83,7 @@ When a participant opens Claude, ask which scenario they are working on:
 
 After they confirm, load the scenario's CLAUDE.md:
 
-  Scenario 1 → `Agentic Apps/retail-customer-service/CLAUDE.md`
+  Scenario 1 -> Agentic Apps/retail-customer-service/CLAUDE.md
 
 Each scenario CLAUDE.md contains the full lab guide, intent-based hints, and
 all context needed to assist a participant without giving away answers.
@@ -65,3 +97,6 @@ all context needed to assist a participant without giving away answers.
 - Instructors may ask for direct answers — answer them fully.
 - If a file path is mentioned, offer to read and summarise it before answering.
 - Keep responses concise and terminal-friendly (no decorative markdown).
+- When executing setup scripts, always show the command you are running and confirm
+  with the admin before running it the first time. After that, run subsequent user
+  onboarding commands without re-confirming each time.

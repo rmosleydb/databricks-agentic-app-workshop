@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 CATALOG           = os.environ.get("WORKSHOP_CATALOG", "robert_mosley")
-SCHEMA            = os.environ.get("WORKSHOP_SCHEMA",  "cs_workshop")
+SCHEMA            = os.environ.get("WORKSHOP_SCHEMA",  "shared")
 LLM_ENDPOINT      = os.environ.get("LLM_ENDPOINT",     "databricks-claude-sonnet-4-6")
 LAKEBASE_INSTANCE = os.environ.get("LAKEBASE_INSTANCE_NAME", "cs-agent-workshop-memory")
 DATABRICKS_HOST   = os.environ.get("DATABRICKS_HOST", "")

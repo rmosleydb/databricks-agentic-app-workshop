@@ -7,7 +7,7 @@ variables:
     default: "robert_mosley"
   schema:
     description: "Workshop schema (set by instructor after running workspace_setup.py)"
-    default: "cs_workshop"
+    default: "shared"
   lakebase_instance:
     description: "Shared Lakebase instance name (set by instructor after running workspace_setup.py)"
     default: "cs-agent-workshop-memory"
