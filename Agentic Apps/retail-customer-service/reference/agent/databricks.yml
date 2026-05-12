@@ -53,7 +53,7 @@ resources:
             permission: CAN_CONNECT_AND_CREATE
         # Note: UC function execute permissions are granted at schema level
         # via GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA to the app service principal
-        # — see orchestration/workspace_setup.py step 6.
+        # — see setup/workspace_setup.py step 6.
 
 targets:
   dev:

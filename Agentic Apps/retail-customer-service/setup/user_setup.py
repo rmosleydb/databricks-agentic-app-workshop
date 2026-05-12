@@ -10,7 +10,7 @@ What this script does:
   4. Creates starter app.yaml in the user's workspace
 
 Usage:
-    python orchestration/user_setup.py \\
+    python "Agentic Apps/retail-customer-service/setup/user_setup.py" \\
         --workspace-url https://dbc-9dcd6158-e299.cloud.databricks.com \\
         --user-email attendee@company.com \\
         --token dapi... \\

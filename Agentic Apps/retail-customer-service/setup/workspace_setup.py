@@ -14,7 +14,7 @@ What this script does:
      (all participants share one instance; conversations are isolated by thread_id)
 
 Usage:
-    python orchestration/workspace_setup.py \\
+    python "Agentic Apps/retail-customer-service/setup/workspace_setup.py" \\
         --profile ai-specialist \\
         --workshop-catalog workshop_catalog \\
         --workshop-schema customer_support_workshop \\

@@ -15,8 +15,8 @@ The questions surface the 4 quality issues baked into the data:
   5 return/tone         — agent approves out-of-policy returns or uses pushy language
   5 recommendation/tone — agent uses aggressive sales language ("ACT NOW", etc.)
 
-Usage (from repo root):
-    cd agent
+Usage (from the reference/agent directory):
+    cd "Agentic Apps/retail-customer-service/reference/agent"
     uv run python ../scripts/generate_traces.py \\
         --experiment /Users/you@company.com/cs-agent-workshop
 
