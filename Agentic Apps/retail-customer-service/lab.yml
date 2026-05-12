@@ -1,0 +1,135 @@
+name: retail-customer-service
+title: "Retail Customer Service Agent"
+version: "1.0"
+description: >
+  Build, evaluate, and harden a LangGraph-based customer support agent for
+  a fictional technology retailer (TechMart). Participants create UC Functions
+  as tools, deploy via Databricks Asset Bundles, observe quality failures,
+  measure them with MLflow LLM judges, then fix and re-measure.
+
+estimated_duration_minutes: 100
+difficulty: intermediate
+
+technologies:
+  - LangGraph
+  - Databricks Apps
+  - Databricks Asset Bundles
+  - Unity Catalog Functions
+  - MCP (DatabricksMCPServer)
+  - MLflow Tracing
+  - mlflow.genai.evaluate
+  - Guidelines Scorers
+  - Lakebase (AsyncCheckpointSaver)
+  - Vector Search
+
+learning_objectives:
+  - Connect Unity Catalog data to an agent via UC Functions and MCP
+  - Deploy a LangGraph agent as a Databricks App using Asset Bundles
+  - Generate MLflow traces from scripted conversations
+  - Curate a labeled eval dataset from real agent traces
+  - Write LLM judges (Guidelines scorers) targeting specific quality dimensions
+  - Measure agent quality before and after a targeted fix
+  - Understand the agent hardening lifecycle
+
+steps:
+  - id: explore
+    name: "Explore the Data"
+    duration_minutes: 15
+    description: >
+      Query Unity Catalog tables to understand the TechMart data: products,
+      product_docs, orders, customers, policies, and the vector search index.
+      Identify anomalies that will later cause agent quality issues.
+
+  - id: build
+    name: "Build and Deploy"
+    duration_minutes: 25
+    description: >
+      Create four UC Functions (product_lookup, get_product_details,
+      get_order_status, get_return_policy). Write the LangGraph agent using
+      DatabricksMCPServer and AsyncCheckpointSaver. Deploy as a Databricks
+      App via databricks bundle deploy.
+
+  - id: break
+    name: "Break the Agent"
+    duration_minutes: 10
+    description: >
+      Chat with the deployed agent to surface quality issues: discontinued
+      product recommendations, incorrect warranty claims (3-year vs. 1-year),
+      pushy sales language, and policy overreach on returns.
+
+  - id: evaluate
+    name: "Evaluate"
+    duration_minutes: 30
+    description: >
+      Run generate_traces.py to generate 25 scripted traces. Curate an eval
+      dataset from the traces. Define three Guidelines scorers (factual_accuracy,
+      tone_quality, policy_compliance). Run mlflow.genai.evaluate and review
+      per-example scores in the MLflow UI.
+
+  - id: fix_and_verify
+    name: "Fix and Verify"
+    duration_minutes: 20
+    description: >
+      Apply a targeted fix (system prompt guardrails and/or data fix).
+      Redeploy via bundle deploy. Re-run evaluation with the same dataset
+      and judges. Compare metrics to confirm improvement.
+
+quality_issues_planted:
+  - id: discontinued_products
+    description: >
+      Several products have discontinued=true in the products table, but their
+      product_docs still say "available for immediate purchase". The agent
+      recommends them as available.
+    root_cause: data
+    fix_strategy: data_fix_or_prompt
+
+  - id: wrong_warranty
+    description: >
+      Some product_docs contain "3-year manufacturer warranty" claims that
+      contradict the 1-year standard policy. The agent states 3 years.
+    root_cause: data
+    fix_strategy: data_fix_or_prompt
+
+  - id: pushy_tone
+    description: >
+      Some product_docs contain phrases like "ACT NOW", "limited inventory",
+      "don't miss out". The agent repeats these in recommendations.
+    root_cause: data
+    fix_strategy: data_fix_or_prompt
+
+  - id: policy_overreach
+    description: >
+      The agent approves return requests outside the 30-day window without
+      checking policy or escalating. No guardrail in the system prompt.
+    root_cause: prompt
+    fix_strategy: prompt_engineering
+
+required_resources:
+  - type: unity_catalog
+    description: "Catalog and schema with products, product_docs, orders, customers, policies tables"
+    provisioned_by: workspace_setup.py
+
+  - type: vector_search_index
+    description: "product_docs_vs — delta sync index on product_docs table"
+    provisioned_by: workspace_setup.py
+
+  - type: mlflow_experiment
+    description: "/Users/{user}/cs-agent-workshop"
+    provisioned_by: workspace_setup.py
+
+  - type: lakebase_instance
+    description: "Shared PostgreSQL instance for AsyncCheckpointSaver"
+    provisioned_by: instructor (shared per cohort)
+
+  - type: databricks_app
+    description: "cs-agent-{username}-dev — deployed per participant"
+    provisioned_by: user_setup.py + databricks bundle deploy
+
+setup_scripts:
+  instructor: "setup/workspace_setup.py"
+  participant: "setup/user_setup.py"
+
+reference_implementation: "reference/agent/"
+trace_generator: "reference/scripts/generate_traces.py"
+judge_definitions: "reference/scripts/create_judges.py"
+claude_guide: "CLAUDE.md"

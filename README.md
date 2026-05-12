@@ -1,185 +1,126 @@
-# From Prompt to Production: Hardening an AI Customer Support Agent
+# Databricks Agentic App Workshop
 
-A 2-hour hands-on Databricks workshop where participants build, test, evaluate,
-and harden an AI customer support agent using Claude Code in CoDA.
+Hands-on labs for building, evaluating, and hardening agentic applications
+on the Databricks AI platform.
 
----
-
-## What You'll Build
-
-A fully deployed AI customer support agent for a fictional tech retailer (TechMart)
-that answers product questions, checks order status, and handles return requests.
-
-More importantly, you'll discover that the agent has quality issues — and you'll
-use MLflow's eval framework to measure them, fix them, and prove the improvement.
-
-**Workshop flow:**
-1. Explore the data (15 min)
-2. Build and deploy the agent (25 min)
-3. Chat with it and find quality issues (10 min)
-4. Generate traces, label data, run LLM judges (30 min)
-5. Fix the agent and verify improvement (20 min)
-
----
-
-## What You'll Learn
-
-- How to create UC Functions as agent tools
-- How to deploy an agent as a Databricks App using LangGraph
-- How MLflow tracing captures what your agent actually does
-- How to build an eval dataset from real agent traces
-- How to write LLM judges using MLflow Guidelines scorers
-- How the evaluate-fix-evaluate loop works in production
-
----
-
-## Prerequisites
-
-- Access to a Databricks workspace with the workshop catalog pre-populated
-- CoDA installed and connected to your workspace (see instructor)
-- A Databricks PAT (personal access token)
-
----
-
-## Pre-Work (Instructor Only)
-
-Run these before the session:
-
-### 1. Install dependencies
-
-```bash
-pip install databricks-sdk
-```
-
-### 2. Run workspace setup (once per workspace)
-
-```bash
-python orchestration/workspace_setup.py \
-    --profile ai-specialist \
-    --workshop-catalog workshop_catalog \
-    --workshop-schema customer_support_workshop \
-    --source-catalog robert_mosley \
-    --source-schema customer_support
-
-# This takes ~15 minutes (vector search index sync)
-```
-
-The setup script:
-- Creates `workshop_catalog.customer_support_workshop` with all tables
-- Injects quality bugs into product_docs (this is the workshop scenario)
-- Creates or verifies the vector search index
-- Creates the four UC Functions participants will use as tools
-- Grants permissions to all workspace users
-
-### 3. Run user setup for each attendee
-
-```bash
-python orchestration/user_setup.py \
-    --workspace-url https://your-workspace.cloud.databricks.com \
-    --user-email attendee@company.com \
-    --token dapi... \
-    --catalog workshop_catalog \
-    --schema attendee_schema
-```
-
-Or run for all attendees:
-```bash
-while read email; do
-    python orchestration/user_setup.py \
-        --workspace-url https://your-workspace.cloud.databricks.com \
-        --user-email "$email" \
-        --token "$DATABRICKS_TOKEN" \
-        --catalog workshop_catalog
-done < attendees.txt
-```
-
-### 4. Pre-flight checklist
-
-Before participants arrive:
-- [ ] `workshop_catalog.customer_support_workshop` exists with all 7 tables
-- [ ] `product_docs_vs` vector search index is ONLINE
-- [ ] `product_lookup` UC Function returns results when tested
-- [ ] At least one CoDA instance is running and accessible
-- [ ] You have a fallback: a pre-deployed app URL to share if someone can't deploy
-- [ ] MLflow experiment at `/Users/robert.mosley@databricks.com/cs-agent-workshop` is accessible
-
----
-
-## Participant Quick Start
-
-1. Open CoDA in your browser (instructor will give you the URL)
-2. In the CoDA terminal, point to this workshop:
-   ```
-   cd ~/projects
-   git clone https://github.com/YOUR_ORG/databricks-cs-agent-workshop.git
-   cd databricks-cs-agent-workshop
-   ```
-3. Open a Claude Code session:
-   ```
-   claude
-   ```
-4. Say: "I want to start the workshop. Help me run Step 1."
-
-Claude has the full workshop context in CLAUDE.md and will guide you step by step.
+Each scenario takes participants from raw data in Unity Catalog to a deployed,
+production-ready AI application — with full quality measurement along the way.
 
 ---
 
 ## Repository Structure
 
 ```
-databricks-cs-agent-workshop/
-├── CLAUDE.md                    # Workshop skill — Claude's lab guide
-├── README.md                    # This file
-├── agent/
-│   ├── agent.py                 # Agent blueprint (LangGraph + FastAPI)
-│   ├── app.yaml                 # Databricks Apps deployment config
-│   └── requirements.txt         # Python dependencies
-├── orchestration/
-│   ├── workspace_setup.py       # Instructor: run once to prep workspace
-│   └── user_setup.py            # Instructor: run per attendee
-├── scripts/
-│   ├── generate_traces.py       # Step 4: generate 25 scripted traces
-│   └── create_judges.py         # Step 4: run eval with 3 judges
-└── enablement/
-    └── instructor_guide.md      # Full instructor guide with timing
+databricks-agentic-app-workshop/
+├── CLAUDE.md                          <- AI assistant router (start here)
+├── skills/
+│   └── agentic-app-best-practices.md  <- Universal patterns reference
+└── Agentic Apps/
+    └── retail-customer-service/       <- Scenario 1
+        ├── CLAUDE.md                  <- AI lab partner guide (no spoilers)
+        ├── lab.yml                    <- Machine-readable lab metadata
+        ├── setup/
+        │   ├── workspace_setup.py     <- Instructor: run once per cohort
+        │   └── user_setup.py          <- Instructor: run once per participant
+        ├── reference/
+        │   ├── agent/                 <- Complete working implementation
+        │   │   ├── agent_server/      <- LangGraph agent + server code
+        │   │   ├── pyproject.toml
+        │   │   ├── databricks.yml
+        │   │   └── app.yaml
+        │   └── scripts/
+        │       ├── generate_traces.py <- Generate 25 scripted traces
+        │       └── create_judges.py   <- MLflow Guidelines scorer definitions
+        └── docs/
+            └── instructor_guide.md    <- Facilitator notes and timing
 ```
 
 ---
 
-## The Quality Issues (Instructor Reference)
+## Available Scenarios
 
-The workspace setup script injects four intentional quality issues.
-Participants discover these in Step 3 and fix them in Step 5.
+### 1. Retail Customer Service Agent
 
-| # | Issue | How it manifests | Judge that catches it |
-|---|-------|------------------|----------------------|
-| 1 | Discontinued products described as available | Agent recommends products that can't be purchased | factual_accuracy |
-| 2 | Wrong warranty info (3 years vs 1 year standard) | Agent tells customers they have a 3-year warranty | factual_accuracy |
-| 3 | Pushy sales language in product docs | Agent uses "ACT NOW", "DON'T MISS OUT" in responses | tone_quality |
-| 4 | Vague return policy leads to over-promising | Agent approves returns outside the 30-day window | policy_compliance |
+Build a LangGraph customer support agent for TechMart, a fictional technology
+retailer. The agent answers product questions, checks order status, and handles
+return requests using Unity Catalog data.
 
----
+What participants learn:
+- Connecting Unity Catalog tables to an agent via UC Functions and MCP
+- Deploying a LangGraph agent as a Databricks App using Asset Bundles
+- Generating and browsing MLflow traces
+- Building an eval dataset from real agent conversations
+- Writing LLM judges (Guidelines scorers) for quality dimensions
+- Measuring and proving agent improvement
 
-## Custom Path (Full Day)
+Technologies: LangGraph, UC Functions, DatabricksMCPServer, Databricks Apps,
+Databricks Asset Bundles, MLflow tracing, mlflow.genai.evaluate, Guidelines
+scorers, Lakebase (AsyncCheckpointSaver), Vector Search.
 
-For participants with their own data and use case:
-
-1. Steps 1-2 use their own data instead of TechMart
-2. Steps 3-5 follow the same evaluation lifecycle
-3. The CLAUDE.md scaffold, judge templates, and trace scripts all work with any agent
-
-The instructor can substitute `{{CATALOG}}` and `{{SCHEMA}}` with the customer's
-actual catalog/schema when running `user_setup.py`.
+Duration: ~100 minutes
+Difficulty: intermediate
 
 ---
 
-## Related Resources
+## For Instructors
 
-- Reference workshop: https://github.com/AnanyaDBJ/databricks-ai-workshops/tree/main/advanced
-- CoDA (coding environment): https://github.com/datasciencemonkey/coding-agents-databricks-apps
-- MLflow GenAI evaluation docs: https://mlflow.org/docs/latest/llms/llm-evaluate/index.html
-- Databricks LangChain docs: https://docs.databricks.com/aws/en/generative-ai/agent-framework/agent-overview
+Before the workshop, run workspace_setup.py once to create the shared
+Unity Catalog objects, Vector Search index, and MLflow experiment.
+
+For each participant, run user_setup.py to generate their personal
+databricks.yml and app.yaml with the correct catalog, schema, and username.
+
+See `Agentic Apps/retail-customer-service/docs/instructor_guide.md` for
+full facilitation notes, timing guidance, and debrief talking points.
+
+Quick start:
+
+```bash
+# Set up the workspace (once per cohort)
+python "Agentic Apps/retail-customer-service/setup/workspace_setup.py" \
+  --catalog my_catalog --schema my_schema --profile my_profile
+
+# Onboard a participant
+python "Agentic Apps/retail-customer-service/setup/user_setup.py" \
+  --user alice@company.com --catalog my_catalog --schema my_schema
+```
 
 ---
 
-*Workshop version: 1.0 | Built for Databricks AI Platform*
+## For Participants
+
+Open this repo in an environment with Claude Code (or any Claude-backed AI
+assistant) and say: "I'm a participant working on the retail customer service
+lab." The AI assistant will load the scenario guide and walk you through it
+step by step.
+
+If you don't have an AI assistant, the lab guide is at:
+`Agentic Apps/retail-customer-service/CLAUDE.md`
+
+---
+
+## AI Assistant Integration
+
+This repo contains CLAUDE.md files that act as context for Claude Code and
+similar AI coding assistants:
+
+- Root CLAUDE.md: routes between admin and participant workflows
+- Scenario CLAUDE.md: intent-based lab guide (hints, not answers)
+- skills/agentic-app-best-practices.md: universal architecture patterns
+
+The scenario CLAUDE.md is designed to guide without giving away answers.
+Reference implementations in reference/ are the "spoilers" — participants
+should try to build things themselves before consulting them.
+
+---
+
+## Contributing a New Scenario
+
+1. Create `Agentic Apps/{scenario-name}/` following the retail-customer-service
+   structure.
+2. Write a `CLAUDE.md` using the intent-based guide format (see existing one
+   as a template).
+3. Write a `lab.yml` declaring steps, technologies, and quality issues planted.
+4. Add setup scripts under `setup/`.
+5. Put the reference implementation under `reference/`.
+6. Update this README's scenario list.
