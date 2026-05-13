@@ -18,7 +18,7 @@ When admin says "set up the workspace" or similar, collect:
 
 1. Workspace URL (e.g. https://adb-1234567890.azuredatabricks.net)
 2. Databricks CLI profile name (or raw token)
-3. Catalog name — default is workshop_catalog, ask if they want to override
+3. Catalog name — default is cs_agent_workshop, ask if they want to override
 
 Then show the command and confirm before running it the first time:
 
