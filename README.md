@@ -78,26 +78,16 @@ full facilitation notes, timing guidance, and debrief talking points.
 Quick start:
 
 ```bash
-# 1. Install dependencies (one-time)
-pip install -r "Agentic Apps/retail-customer-service/setup/requirements.txt"
-# or with uv:
-uv pip install -r "Agentic Apps/retail-customer-service/setup/requirements.txt"
+# Set up the workspace (once per cohort)
+python "Agentic Apps/retail-customer-service/setup/workspace_setup.py" \
+  --profile my_profile --workshop-catalog my_catalog
 
-# 2. Set up the workspace (once per cohort — brings all data from this repo)
-#    No external data dependencies. Discovers your SQL warehouse automatically.
-python3 "Agentic Apps/retail-customer-service/setup/workspace_setup.py"
-
-# Optional overrides (see --help for all options):
-python3 "Agentic Apps/retail-customer-service/setup/workspace_setup.py" \
-  --profile DEFAULT \
-  --workshop-catalog cs_agent_workshop
-
-# 3. Onboard a participant
-python3 "Agentic Apps/retail-customer-service/setup/user_setup.py" \
+# Onboard a participant
+python "Agentic Apps/retail-customer-service/setup/user_setup.py" \
   --workspace-url https://adb-xxxx.azuredatabricks.net \
   --user-email alice@company.com \
   --token my_token \
-  --catalog cs_agent_workshop
+  --catalog my_catalog
 ```
 
 ---

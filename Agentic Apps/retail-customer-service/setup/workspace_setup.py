@@ -1,421 +1,315 @@
 """
 Workshop Workspace Setup
 ========================
-Run ONCE before the workshop (ideally the day before, to let VS index sync).
+Run ONCE before the workshop to prepare the shared Databricks environment.
 
-This script is SELF-CONTAINED — it brings all source data from the repo.
-No external catalog, no hardcoded warehouse IDs, no workspace-specific defaults.
+What this script does:
+  1. Creates the workshop catalog and schema
+  2. Copies all tables from the source catalog into the 'shared' schema
+  3. Injects intentional quality bugs into product_docs for the workshop scenario
+  4. Creates or verifies the vector search endpoint and delta-sync index
+  5. Grants permissions to all workspace users (USE CATALOG, USE SCHEMA, SELECT,
+     CREATE SCHEMA so each participant can create their own schema)
+  6. Provisions a shared Lakebase instance for agent conversation memory
+     (all participants share one instance; conversations are isolated by thread_id)
 
-What it does:
-  1. Status check  — prints current state before touching anything
-  2. Catalog/schema — creates catalog + shared schema (idempotent)
-  3. Load data     — loads products, orders, policies from repo CSV files
-  4. product_docs  — derives the VS-indexed table from products CSV
-  5. Inject bugs   — bakes 3 intentional quality issues into the data
-  6. Vector Search — creates endpoint (if needed) + delta-sync index
-  7. Grants        — USE CATALOG / USE SCHEMA / SELECT / CREATE SCHEMA
-  8. Lakebase      — provisions shared instance for agent memory
+Participants create their own UC Functions during the workshop as part of the lab.
 
-Prerequisites:
-  pip install databricks-sdk   (or: uv pip install -r setup/requirements.txt)
+Usage:
+    python "Agentic Apps/retail-customer-service/setup/workspace_setup.py" \\
+        --profile ai-specialist \\
+        --workshop-catalog workshop_catalog \\
+        --workshop-schema shared \\
+        --source-catalog robert_mosley \\
+        --source-schema customer_support \\
+        --lakebase-name cs-agent-workshop-memory
 
-Usage (minimal — discovers warehouse automatically):
-  python3 setup/workspace_setup.py
+The script is idempotent — safe to re-run. The Lakebase instance creation
+takes ~5 minutes on first run; subsequent runs skip it if it already exists.
 
-Usage (explicit):
-  python3 setup/workspace_setup.py \\
-      --profile DEFAULT \\
-      --workshop-catalog cs_agent_workshop \\
-      --workshop-schema shared \\
-      --vs-endpoint cs-workshop-vs-endpoint \\
-      --lakebase-name cs-agent-workshop-memory
-
-The script is fully idempotent — re-running prints status and fills in
-anything missing without touching rows that already exist.
-
-After running, give participants:
-  WORKSHOP_CATALOG=<printed value>
-  LAKEBASE_INSTANCE_NAME=<printed value>
+After running, give participants the printed WORKSHOP_CATALOG and
+LAKEBASE_INSTANCE_NAME values. Each participant will create their own schema
+under WORKSHOP_CATALOG. Participants then tell Claude to set up their workspace.
 """
 
 import argparse
-import csv
 import datetime
-import io
-import logging
-import os
-import sys
 import time
+import logging
+import sys
+from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.vectorsearch import (
+    EndpointType,
+    VectorIndexType,
+    DeltaSyncVectorIndexSpecRequest,
+    EmbeddingSourceColumn,
+    PipelineType,
+)
+from databricks.sdk.service.database import DatabaseInstance
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s  %(message)s",
+    format="%(asctime)s  %(levelname)s  %(message)s",
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger(__name__)
 
-# Path to data files relative to this script
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(SCRIPT_DIR, "data")
-
-
 # ---------------------------------------------------------------------------
 # SQL helper
 # ---------------------------------------------------------------------------
-
-def _sql(w, warehouse_id: str, statement: str, description: str = "") -> object:
-    from databricks.sdk.service.sql import StatementState
+def sql(w: WorkspaceClient, warehouse_id: str, statement: str, description: str = "") -> object:
     if description:
-        log.info("    %s", description)
+        log.info("  SQL: %s", description)
     resp = w.statement_execution.execute_statement(
         statement=statement,
         warehouse_id=warehouse_id,
         wait_timeout="50s",
     )
+    # Poll if still running after the wait
+    from databricks.sdk.service.sql import StatementState
+    max_polls = 60  # up to 10 minutes total
     polls = 0
-    while (resp.status and resp.status.state in
-           (StatementState.PENDING, StatementState.RUNNING)):
-        if polls >= 72:  # 12 minutes max
-            raise RuntimeError(f"SQL timed out: {statement[:80]}")
+    while (resp.status and resp.status.state and
+           resp.status.state in (StatementState.PENDING, StatementState.RUNNING)):
+        if polls >= max_polls:
+            raise RuntimeError(f"SQL timed out after polling: {statement[:80]}")
         time.sleep(10)
         polls += 1
         resp = w.statement_execution.get_statement(resp.statement_id)
-    if resp.status and resp.status.state != StatementState.SUCCEEDED:
+    if resp.status and resp.status.state and resp.status.state != StatementState.SUCCEEDED:
         err = resp.status.error
-        raise RuntimeError(
-            f"SQL failed ({resp.status.state}): "
-            f"{err.message if err else statement[:100]}"
-        )
+        raise RuntimeError(f"SQL failed ({resp.status.state}): {err.message if err else statement[:80]}")
     return resp
 
 
-def _sql_rows(w, warehouse_id: str, statement: str) -> list:
-    resp = _sql(w, warehouse_id, statement)
+def sql_rows(w: WorkspaceClient, warehouse_id: str, statement: str) -> list[list]:
+    resp = sql(w, warehouse_id, statement)
     if resp.result and resp.result.data_array:
         return resp.result.data_array
     return []
 
 
-def _count(w, wh: str, table: str) -> int:
-    """Return row count for a fully-qualified table, or -1 if it doesn't exist."""
-    try:
-        rows = _sql_rows(w, wh, f"SELECT COUNT(*) FROM {table}")
-        return int(rows[0][0]) if rows else 0
-    except Exception:
-        return -1
-
-
 # ---------------------------------------------------------------------------
-# Warehouse discovery
+# Main setup
 # ---------------------------------------------------------------------------
+def setup(args):
+    log.info("Connecting to Databricks workspace...")
+    w = WorkspaceClient(profile=args.profile)
+    me = w.current_user.me()
+    log.info("Authenticated as %s", me.user_name)
 
-def discover_warehouse(w, warehouse_id_hint: str | None) -> str:
-    """
-    Return a usable warehouse ID.
-    Priority: explicit arg > running serverless > any running warehouse > first available
-    """
-    if warehouse_id_hint:
-        # Verify it exists
+    wh = args.warehouse_id
+    cat = args.workshop_catalog
+    schema = args.workshop_schema
+    src_cat = args.source_catalog
+    src_schema = args.source_schema
+    vs_endpoint = args.vs_endpoint
+
+    # -------------------------------------------------------------------------
+    # 1. Create catalog and schema
+    # -------------------------------------------------------------------------
+    log.info("Step 1: Creating catalog and shared schema...")
+    sql(w, wh, f"CREATE CATALOG IF NOT EXISTS `{cat}`",
+        f"create catalog {cat}")
+    sql(w, wh, f"USE CATALOG `{cat}`", "use catalog")
+    sql(w, wh, f"CREATE SCHEMA IF NOT EXISTS `{cat}`.`{schema}`",
+        f"create shared schema {schema}")
+
+    # -------------------------------------------------------------------------
+    # 2. Copy source tables
+    # -------------------------------------------------------------------------
+    log.info("Step 2: Copying tables from %s.%s ...", src_cat, src_schema)
+    tables = [
+        "products", "product_docs", "customers", "orders",
+        "order_details", "policies", "cust_service_data"
+    ]
+    for tbl in tables:
+            # Check if table already exists and has rows
         try:
-            wh = w.warehouses.get(warehouse_id_hint)
-            log.info("  Using provided warehouse: %s (%s)", wh.name, warehouse_id_hint)
-            return warehouse_id_hint
+            rows = sql_rows(w, wh,
+                f"SELECT COUNT(*) FROM `{cat}`.`{schema}`.`{tbl}`")
+            count = int(rows[0][0]) if rows else 0
+            if count > 0:
+                log.info("  Table %s already has %d rows — skipping copy", tbl, count)
+                continue
         except Exception:
-            log.warning("  Warehouse %s not found — auto-discovering...", warehouse_id_hint)
+            pass
 
-    warehouses = list(w.warehouses.list())
-    if not warehouses:
-        raise RuntimeError(
-            "No SQL warehouses found in this workspace. "
-            "Create a warehouse in the Databricks UI (SQL > SQL Warehouses) and re-run."
-        )
+        log.info("  Copying %s ...", tbl)
+        sql(w, wh,
+            f"CREATE OR REPLACE TABLE `{cat}`.`{schema}`.`{tbl}` "
+            f"AS SELECT * FROM `{src_cat}`.`{src_schema}`.`{tbl}`",
+            f"copy {tbl}")
 
-    # Prefer serverless, then pro, then classic — pick running ones first
-    def score(wh):
-        type_score = {"SERVERLESS": 0, "PRO": 1, "CLASSIC": 2}.get(
-            str(wh.warehouse_type or "").upper(), 3
-        )
-        state_score = 0 if str(wh.state or "").upper() == "RUNNING" else 1
-        return (state_score, type_score)
+    # -------------------------------------------------------------------------
+    # 3. Inject workshop quality bugs into product_docs
+    # -------------------------------------------------------------------------
+    log.info("Step 3: Injecting workshop quality bugs into product_docs...")
 
-    best = sorted(warehouses, key=score)[0]
-    log.info("  Auto-selected warehouse: %s (%s, %s)", best.name, best.id, best.state)
-    return best.id
+    # Enable Change Data Feed (needed for delta-sync vector index)
+    sql(w, wh,
+        f"ALTER TABLE `{cat}`.`{schema}`.`product_docs` "
+        f"SET TBLPROPERTIES (delta.enableChangeDataFeed = true)",
+        "enable CDF on product_docs")
 
-
-# ---------------------------------------------------------------------------
-# Status check
-# ---------------------------------------------------------------------------
-
-def print_status(w, wh: str, cat: str, schema: str, vs_endpoint: str, lakebase_name: str):
-    log.info("")
-    log.info("Current state:")
-    shared = f"`{cat}`.`{schema}`"
-
-    for tbl in ["products", "orders", "policies", "product_docs"]:
-        n = _count(w, wh, f"{shared}.`{tbl}`")
-        state = f"{n} rows" if n >= 0 else "not found"
-        log.info("  %-20s %s", tbl, state)
-
-    try:
-        w.vector_search_endpoints.get_endpoint(vs_endpoint)
-        log.info("  %-20s exists", "VS endpoint")
-    except Exception:
-        log.info("  %-20s not found", "VS endpoint")
-
-    index_name = f"{cat}.{schema}.product_docs_vs"
-    try:
-        idx = w.vector_search_indexes.get_index(index_name)
-        ready = getattr(idx.status, "ready", False) if idx.status else False
-        rows = getattr(idx.status, "indexed_row_count", "?") if idx.status else "?"
-        log.info("  %-20s ready=%s, %s rows indexed", "VS index", ready, rows)
-    except Exception:
-        log.info("  %-20s not found", "VS index")
-
-    try:
-        instances = list(w.database.list_database_instances())
-        match = next((i for i in instances if i.name == lakebase_name), None)
-        if match:
-            log.info("  %-20s %s (%s)", "Lakebase", match.name, match.state)
-        else:
-            log.info("  %-20s not found", "Lakebase")
-    except Exception:
-        log.info("  %-20s (API unavailable)", "Lakebase")
-
-    log.info("")
-
-
-# ---------------------------------------------------------------------------
-# Data loading from CSV
-# ---------------------------------------------------------------------------
-
-def _read_csv(filename: str) -> tuple[list[str], list[list[str]]]:
-    path = os.path.join(DATA_DIR, filename)
-    if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"Data file not found: {path}\n"
-            f"Make sure you're running from the repo root, or that setup/data/ exists."
-        )
-    with open(path, newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        rows = list(reader)
-    return rows[0], rows[1:]
-
-
-def _escape(val: str) -> str:
-    """Escape a string value for SQL single-quote embedding."""
-    return val.replace("'", "''")
-
-
-def load_table_from_csv(w, wh: str, cat: str, schema: str, table: str, filename: str):
-    """Create table from CSV if it doesn't exist or is empty."""
-    full = f"`{cat}`.`{schema}`.`{table}`"
-    n = _count(w, wh, full)
-    if n > 0:
-        log.info("  %-20s already has %d rows — skipping", table, n)
-        return
-
-    log.info("  %-20s loading from %s ...", table, filename)
-    cols, rows = _read_csv(filename)
-
-    # Build CREATE TABLE from CSV header (all STRING columns — simple and portable)
-    col_defs = ", ".join(f"`{c}` STRING" for c in cols)
-    _sql(w, wh, f"CREATE TABLE IF NOT EXISTS {full} ({col_defs})")
-
-    # INSERT in batches of 100
-    batch_size = 100
-    for i in range(0, len(rows), batch_size):
-        batch = rows[i:i + batch_size]
-        value_rows = []
-        for row in batch:
-            vals = ", ".join(f"'{_escape(v)}'" for v in row)
-            value_rows.append(f"({vals})")
-        _sql(w, wh,
-             f"INSERT INTO {full} VALUES {', '.join(value_rows)}",
-             f"  inserting rows {i+1}-{min(i+batch_size, len(rows))}")
-
-    n2 = _count(w, wh, full)
-    log.info("  %-20s loaded: %d rows", table, n2)
-
-
-# ---------------------------------------------------------------------------
-# product_docs derivation
-# ---------------------------------------------------------------------------
-
-def create_product_docs(w, wh: str, cat: str, schema: str):
-    """
-    Derive product_docs from products table.
-    Each row has: product_id, product_name, product_category, indexed_doc
-    indexed_doc is a rich text blob used for vector search.
-    """
-    full = f"`{cat}`.`{schema}`.`product_docs`"
-    n = _count(w, wh, full)
-    if n > 0:
-        log.info("  %-20s already has %d rows — skipping", "product_docs", n)
-        return
-
-    log.info("  %-20s deriving from products ...", "product_docs")
-    _sql(w, wh, f"""
-        CREATE TABLE IF NOT EXISTS {full}
-        TBLPROPERTIES (delta.enableChangeDataFeed = true)
-        AS
-        SELECT
-            product_id,
-            product_name,
-            category AS product_category,
-            CONCAT(
-                product_name, ' | Category: ', category,
-                ' | Price: $', price,
-                ' | Availability: ', availability,
-                ' | Warranty: ', warranty_years, ' year(s). ',
-                description
-            ) AS indexed_doc
-        FROM `{cat}`.`{schema}`.`products`
-    """, "creating product_docs from products")
-
-    n2 = _count(w, wh, full)
-    log.info("  %-20s created: %d rows", "product_docs", n2)
-
-
-# ---------------------------------------------------------------------------
-# Bug injection
-# ---------------------------------------------------------------------------
-
-def inject_bugs(w, wh: str, cat: str, schema: str):
-    """
-    Inject 3 intentional quality issues participants will discover and fix.
-
-    BUG 1 (products + product_docs): Discontinued products described as available.
-           The products.csv ships with availability='Discontinued' for 5 products,
-           but product_docs says 'Currently available for immediate purchase.'
-           Effect: agent tells customer a discontinued item is in stock.
-
-    BUG 2 (product_docs): Warranty claim says '3 years' in headphone docs.
-           The policies table correctly says 1-year warranty.
-           Effect: agent cites 3-year warranty when customers ask.
-
-    BUG 3 (policies): An 'extended' return policy row says customers can
-           return items 'for any reason within 1 year' — overriding the
-           real 30-day policy that is also in the table.
-           Effect: agent approves out-of-policy returns.
-    """
-    docs_table = f"`{cat}`.`{schema}`.`product_docs`"
-    policies_table = f"`{cat}`.`{schema}`.`policies`"
-
-    # BUG 1: discontinued products labelled as available in indexed_doc
-    discontinued_rows = _sql_rows(w, wh, f"""
-        SELECT p.product_id, p.product_name
+    # BUG 1: Discontinued products still described as "available"
+    # Find up to 5 discontinued products and update their docs to sound active
+    discontinued = sql_rows(w, wh, f"""
+        SELECT p.product_id, p.product_name, pd.product_doc
         FROM `{cat}`.`{schema}`.`products` p
-        WHERE LOWER(p.availability) = 'discontinued'
+        JOIN `{cat}`.`{schema}`.`product_docs` pd ON p.product_id = pd.product_id
+        WHERE p.discontinued = true
         LIMIT 5
     """)
-    if discontinued_rows:
-        ids = ", ".join(f"'{r[0]}'" for r in discontinued_rows)
-        _sql(w, wh, f"""
-            UPDATE {docs_table}
-            SET indexed_doc = CONCAT(indexed_doc,
-                ' This product is currently in stock and available for immediate purchase.',
-                ' Order today for fast delivery.')
-            WHERE product_id IN ({ids})
-        """, f"Bug 1: mark {len(discontinued_rows)} discontinued products as available in docs")
-    else:
-        log.info("  Bug 1: no discontinued products found — skipping")
+    for row in discontinued:
+        pid, pname, _ = row[0], row[1], row[2]
+        log.info("  Bug 1: Marking discontinued product '%s' as available in docs", pname)
+        sql(w, wh, f"""
+            UPDATE `{cat}`.`{schema}`.`product_docs`
+            SET product_doc = product_doc ||
+                ' This product is currently in stock and available for immediate purchase. '
+                'Order today for fast delivery.'
+            WHERE product_id = '{pid}'
+        """, f"bug1 - {pname}")
 
-    # BUG 2: wrong warranty duration in headphone/audio docs
-    audio_rows = _sql_rows(w, wh, f"""
+    # BUG 2: Wrong warranty info in one popular product doc
+    # Find a product in Electronics / Headphones category
+    warranty_target = sql_rows(w, wh, f"""
         SELECT product_id, product_name
-        FROM {docs_table}
-        WHERE LOWER(product_category) LIKE '%headphone%'
-           OR LOWER(product_category) LIKE '%audio%'
-           OR LOWER(product_name) LIKE '%headphone%'
-           OR LOWER(product_name) LIKE '%earbud%'
-           OR LOWER(product_name) LIKE '%audio%'
-        LIMIT 3
+        FROM `{cat}`.`{schema}`.`product_docs`
+        WHERE LOWER(product_category) LIKE '%electronics%'
+           OR LOWER(product_sub_category) LIKE '%headphone%'
+           OR LOWER(product_sub_category) LIKE '%audio%'
+        LIMIT 1
     """)
-    if audio_rows:
-        ids = ", ".join(f"'{r[0]}'" for r in audio_rows)
-        _sql(w, wh, f"""
-            UPDATE {docs_table}
-            SET indexed_doc = CONCAT(indexed_doc,
-                ' All products in this category include a comprehensive 3-year',
-                ' manufacturer warranty covering parts and labor.')
-            WHERE product_id IN ({ids})
-        """, f"Bug 2: inject wrong warranty (3yr) into {len(audio_rows)} audio product docs")
-    else:
-        log.info("  Bug 2: no audio products found — skipping")
+    if warranty_target:
+        wpid, wpname = warranty_target[0][0], warranty_target[0][1]
+        log.info("  Bug 2: Adding wrong warranty claim (3 years) to '%s'", wpname)
+        sql(w, wh, f"""
+            UPDATE `{cat}`.`{schema}`.`product_docs`
+            SET product_doc = product_doc ||
+                ' All products in this category include a comprehensive 3-year manufacturer warranty '
+                'covering parts and labor.'
+            WHERE product_id = '{wpid}'
+        """, f"bug2 - {wpname}")
 
-    # BUG 3: insert an over-permissive 'extended' return policy row
-    existing_bug = _sql_rows(w, wh, f"""
-        SELECT COUNT(*) FROM {policies_table}
-        WHERE LOWER(policy) LIKE '%extended%'
+    # BUG 3: Aggressive/pushy tone in 3-5 product docs
+    # Find products in a premium sub-category
+    pushy_targets = sql_rows(w, wh, f"""
+        SELECT product_id, product_name
+        FROM `{cat}`.`{schema}`.`product_docs`
+        WHERE LOWER(product_sub_category) LIKE '%laptop%'
+           OR LOWER(product_sub_category) LIKE '%computer%'
+           OR LOWER(product_sub_category) LIKE '%premium%'
+        LIMIT 4
     """)
-    if existing_bug and int(existing_bug[0][0]) > 0:
-        log.info("  Bug 3: extended return policy already present — skipping")
-    else:
-        _sql(w, wh, f"""
-            INSERT INTO {policies_table} (policy, policy_details, last_updated)
+    for row in pushy_targets:
+        ppid, ppname = row[0], row[1]
+        log.info("  Bug 3: Adding pushy sales language to '%s'", ppname)
+        sql(w, wh, f"""
+            UPDATE `{cat}`.`{schema}`.`product_docs`
+            SET product_doc = product_doc ||
+                ' DO NOT MISS OUT! This is our BEST SELLER and inventory is extremely limited. '
+                'Customers who hesitate lose out. Buy NOW before prices increase. '
+                'This deal will not last — act immediately!'
+            WHERE product_id = '{ppid}'
+        """, f"bug3 - {ppname}")
+
+    # BUG 4: Vague return policy that leads to policy overreach
+    # The policies table has columns: policy, policy_details, last_updated
+    policy_rows = sql_rows(w, wh, f"""
+        SELECT policy
+        FROM `{cat}`.`{schema}`.`policies`
+        WHERE LOWER(policy) LIKE '%return%'
+           OR LOWER(policy) LIKE '%refund%'
+           OR LOWER(policy) LIKE '%exchange%'
+        LIMIT 1
+    """)
+    if policy_rows:
+        log.info("  Bug 4: Policies table found — adding ambiguous 'extended' policy...")
+        sql(w, wh, f"""
+            INSERT INTO `{cat}`.`{schema}`.`policies`
+            (policy, policy_details, last_updated)
             VALUES (
                 'Customer Satisfaction Policy (Extended)',
-                'We value customer satisfaction above all else. In situations where a '
-                'customer is unhappy with their purchase, our team is empowered to make '
-                'it right. Customers may return items for any reason within 1 year of '
-                'purchase. Exceptions can always be made for loyal customers and in '
-                'cases of genuine hardship. Representatives should use their best '
-                'judgment to ensure the customer leaves satisfied.',
+                'We value customer satisfaction above all else. In situations where a customer '
+                'is unhappy with their purchase, our team is empowered to make it right. '
+                'Exceptions can be made for loyal customers and in cases of genuine hardship. '
+                'Customer service representatives should use their best judgment to ensure '
+                'the customer leaves satisfied, even if a return is outside the standard window.',
                 current_date()
             )
-        """, "Bug 3: insert over-permissive extended return policy")
+        """, "bug4 - vague return policy")
+    else:
+        log.info("  Bug 4: No return policy found — creating policies table with vague policy...")
+        sql(w, wh, f"""
+            CREATE TABLE IF NOT EXISTS `{cat}`.`{schema}`.`policies` (
+                policy STRING,
+                policy_details STRING,
+                last_updated DATE
+            )
+        """, "create policies table")
+        sql(w, wh, f"""
+            INSERT INTO `{cat}`.`{schema}`.`policies` VALUES
+            ('Standard Return Policy',
+             'Products may be returned within 30 days of purchase in original condition with receipt.',
+             current_date()),
+            ('Warranty Policy',
+             'All products carry a 1-year limited manufacturer warranty against defects.',
+             current_date()),
+            ('Customer Satisfaction Policy (Extended)',
+             'We value customer satisfaction above all else. In situations where a customer '
+             'is unhappy with their purchase, our team is empowered to make it right. '
+             'Exceptions can be made for loyal customers and in cases of genuine hardship. '
+             'Customer service representatives should use their best judgment to ensure '
+             'the customer leaves satisfied, even if a return is outside the standard window.',
+             current_date())
+        """, "insert vague policy")
 
-    log.info("  Quality bugs injected.")
+    log.info("  Quality bugs injected successfully.")
 
+    # -------------------------------------------------------------------------
+    # 4. Vector Search endpoint + index
+    # -------------------------------------------------------------------------
+    log.info("Step 4: Setting up Vector Search...")
 
-# ---------------------------------------------------------------------------
-# Vector Search
-# ---------------------------------------------------------------------------
-
-def setup_vector_search(w, cat: str, schema: str, vs_endpoint: str):
-    from databricks.sdk.service.vectorsearch import (
-        EndpointType, VectorIndexType,
-        DeltaSyncVectorIndexSpecRequest,
-        EmbeddingSourceColumn, PipelineType,
-    )
-
-    # Endpoint
+    # Check if endpoint exists
     try:
         ep = w.vector_search_endpoints.get_endpoint(vs_endpoint)
-        log.info("  VS endpoint '%s' already exists (state: %s)",
-                 vs_endpoint, ep.endpoint_status.state if ep.endpoint_status else "?")
+        log.info("  VS endpoint '%s' found (state: %s)", vs_endpoint, ep.endpoint_status.state if ep.endpoint_status else "unknown")
     except Exception:
-        log.info("  Creating VS endpoint '%s' (can take ~10 minutes)...", vs_endpoint)
+        log.info("  Creating VS endpoint '%s'...", vs_endpoint)
         w.vector_search_endpoints.create_endpoint_and_wait(
             name=vs_endpoint,
             endpoint_type=EndpointType.STANDARD,
             timeout=datetime.timedelta(minutes=30),
         )
-        log.info("  VS endpoint ready.")
+        log.info("  VS endpoint created.")
 
-    # Index
+    # Create delta-sync index on product_docs
     index_name = f"{cat}.{schema}.product_docs_vs"
     source_table = f"{cat}.{schema}.product_docs"
     index_exists = False
     try:
         idx = w.vector_search_indexes.get_index(index_name)
-        ready = getattr(idx.status, "ready", False) if idx.status else False
-        n_rows = getattr(idx.status, "indexed_row_count", "?") if idx.status else "?"
-        log.info("  VS index '%s' exists (ready=%s, indexed_rows=%s)",
-                 index_name, ready, n_rows)
+        # Index exists — check status via .ready attribute (SDK quirk)
+        is_ready = getattr(idx.status, "ready", False) if idx.status else False
+        log.info("  VS index '%s' exists (ready=%s, rows=%s)", index_name,
+                 is_ready, getattr(idx.status, "indexed_row_count", "?"))
         index_exists = True
     except Exception as e:
-        err = str(e).lower()
-        if "does not exist" in err or "resourcedoesnotexist" in type(e).__name__.lower():
-            log.info("  VS index not found — creating...")
+        err_str = str(e).lower()
+        if "does not exist" in err_str or "resourcedoesnotexist" in type(e).__name__.lower():
+            log.info("  VS index not found — will create it.")
         elif "detailed_state" in str(e):
-            log.info("  VS index exists (SDK attribute quirk) — skipping create.")
+            # SDK attribute mismatch — index exists but status object differs
+            log.info("  VS index appears to exist (SDK attribute mismatch) — skipping create.")
             index_exists = True
         else:
             log.warning("  Unexpected error checking VS index: %s", e)
 
     if not index_exists:
+        log.info("  Creating delta-sync VS index '%s'...", index_name)
         w.vector_search_indexes.create_index(
             name=index_name,
             endpoint_name=vs_endpoint,
@@ -432,186 +326,121 @@ def setup_vector_search(w, cat: str, schema: str, vs_endpoint: str):
                 ],
             ),
         )
-        log.info("  Waiting for VS index to sync (~10 minutes)...")
+        # Wait for index to be ready (up to 20 min)
+        log.info("  Waiting for VS index to become ready (this can take ~10 minutes)...")
         for _ in range(40):
             time.sleep(30)
             try:
                 idx = w.vector_search_indexes.get_index(index_name)
+                # SDK returns status.ready (bool) or status.message
                 if idx.status and getattr(idx.status, "ready", False):
-                    n = getattr(idx.status, "indexed_row_count", "?")
-                    log.info("  VS index ready — %s rows indexed.", n)
+                    log.info("    Index is ready! indexed_row_count=%s",
+                             getattr(idx.status, "indexed_row_count", "?"))
                     break
-                msg = getattr(idx.status, "message", "syncing") if idx.status else "no status"
-                log.info("    ... %s", msg)
+                msg = getattr(idx.status, "message", "no message") if idx.status else "no status"
+                log.info("    Index status: %s", msg)
             except Exception as e:
                 log.warning("    Could not check index state: %s", e)
+        log.info("  VS index ready.")
 
-    return index_name
-
-
-# ---------------------------------------------------------------------------
-# Lakebase
-# ---------------------------------------------------------------------------
-
-def provision_lakebase(w, lakebase_name: str) -> str | None:
-    try:
-        existing = {i.name: i for i in w.database.list_database_instances()}
-    except Exception as e:
-        log.warning("  Lakebase API unavailable: %s", e)
-        log.warning("  Skipping Lakebase provisioning.")
-        return None
-
-    if lakebase_name in existing:
-        inst = existing[lakebase_name]
-        log.info("  Lakebase '%s' already exists (state: %s)", lakebase_name, inst.state)
-        return lakebase_name
-
-    log.info("  Creating Lakebase instance '%s' (CU_1) — ~5 minutes...", lakebase_name)
-    try:
-        from databricks.sdk.service.database import DatabaseInstance
-        waiter = w.database.create_database_instance(
-            DatabaseInstance(name=lakebase_name, capacity="CU_1")
-        )
-        inst = waiter.result(timeout=datetime.timedelta(minutes=20))
-        log.info("  Lakebase '%s' is ready.", lakebase_name)
-        return lakebase_name
-    except Exception as e:
-        log.error("  Failed to create Lakebase instance: %s", e)
-        log.error("  You can create it manually: Databricks UI > Compute > Lakebase > Create")
-        log.error("  Then re-run with --lakebase-name <your-instance-name>")
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
-def setup(args):
-    from databricks.sdk import WorkspaceClient
-
-    log.info("Connecting to Databricks workspace...")
-    w = WorkspaceClient(profile=args.profile if args.profile else None)
-    me = w.current_user.me()
-    log.info("Authenticated as: %s", me.user_name)
-    log.info("Workspace:        %s", w.config.host)
-
-    cat = args.workshop_catalog
-    schema = args.workshop_schema
-    vs_endpoint = args.vs_endpoint
-    lakebase_name = args.lakebase_name
-
-    # ── Step 0: discover warehouse ────────────────────────────────────────
-    log.info("")
-    log.info("Step 0: Discovering SQL warehouse...")
-    wh = discover_warehouse(w, args.warehouse_id)
-
-    # ── Step 0b: status check ─────────────────────────────────────────────
-    log.info("")
-    log.info("Step 0b: Current environment status:")
-    print_status(w, wh, cat, schema, vs_endpoint, lakebase_name)
-
-    # ── Step 1: catalog + schema ─────────────────────────────────────────
-    log.info("Step 1: Catalog and schema...")
-    _sql(w, wh, f"CREATE CATALOG IF NOT EXISTS `{cat}`",
-         f"create catalog {cat}")
-    _sql(w, wh, f"CREATE SCHEMA IF NOT EXISTS `{cat}`.`{schema}`",
-         f"create schema {schema}")
-    log.info("  Catalog and schema ready.")
-
-    # ── Step 2: load source tables from CSV ───────────────────────────────
-    log.info("")
-    log.info("Step 2: Loading source data from repo CSVs...")
-    load_table_from_csv(w, wh, cat, schema, "products",  "products.csv")
-    load_table_from_csv(w, wh, cat, schema, "orders",    "orders.csv")
-    load_table_from_csv(w, wh, cat, schema, "policies",  "policies.csv")
-
-    # ── Step 3: derive product_docs ───────────────────────────────────────
-    log.info("")
-    log.info("Step 3: Building product_docs table...")
-    create_product_docs(w, wh, cat, schema)
-
-    # ── Step 4: inject workshop bugs ──────────────────────────────────────
-    log.info("")
-    log.info("Step 4: Injecting workshop quality bugs...")
-    inject_bugs(w, wh, cat, schema)
-
-    # ── Step 5: vector search ─────────────────────────────────────────────
-    log.info("")
-    log.info("Step 5: Setting up Vector Search...")
-    index_name = setup_vector_search(w, cat, schema, vs_endpoint)
-
-    # ── Step 6: permissions ────────────────────────────────────────────────
-    log.info("")
-    log.info("Step 6: Granting permissions to workspace users...")
-    for stmt in [
+    # -------------------------------------------------------------------------
+    # 5. Grant permissions
+    # -------------------------------------------------------------------------
+    log.info("Step 5: Granting permissions to workspace users...")
+    grant_stmts = [
         f"GRANT USE CATALOG ON CATALOG `{cat}` TO `account users`",
         f"GRANT USE SCHEMA ON SCHEMA `{cat}`.`{schema}` TO `account users`",
         f"GRANT SELECT ON SCHEMA `{cat}`.`{schema}` TO `account users`",
         f"GRANT CREATE SCHEMA ON CATALOG `{cat}` TO `account users`",
-    ]:
+    ]
+    for stmt in grant_stmts:
         try:
-            _sql(w, wh, stmt)
+            sql(w, wh, stmt)
         except Exception as e:
-            log.warning("  Grant skipped (non-fatal): %s", e)
+            log.warning("  Grant skipped (non-fatal): %s — %s", stmt[:60], e)
     log.info("  Permissions granted.")
 
-    # ── Step 7: Lakebase ──────────────────────────────────────────────────
-    log.info("")
-    log.info("Step 7: Provisioning shared Lakebase instance...")
-    actual_lakebase = provision_lakebase(w, lakebase_name)
+    # -------------------------------------------------------------------------
+    # 6. Provision shared Lakebase instance (for agent conversation memory)
+    # -------------------------------------------------------------------------
+    log.info("Step 6: Provisioning shared Lakebase instance for agent memory...")
+    lakebase_name = args.lakebase_name
 
-    # ── Summary ────────────────────────────────────────────────────────────
+    lakebase_instance = None
+    try:
+        existing = list(w.database.list_database_instances())
+        for inst in existing:
+            if inst.name == lakebase_name:
+                lakebase_instance = inst
+                log.info("  Lakebase instance '%s' already exists (state: %s)",
+                         lakebase_name, inst.state)
+                break
+    except Exception as e:
+        log.warning("  Could not list Lakebase instances: %s", e)
+
+    if lakebase_instance is None:
+        log.info("  Creating Lakebase instance '%s' (CU_1) — this takes ~5 minutes...", lakebase_name)
+        try:
+            waiter = w.database.create_database_instance(
+                DatabaseInstance(name=lakebase_name, capacity="CU_1")
+            )
+            lakebase_instance = waiter.result(timeout=datetime.timedelta(minutes=15))
+            log.info("  Lakebase instance '%s' is ready.", lakebase_name)
+        except Exception as e:
+            log.error("  Failed to create Lakebase instance: %s", e)
+            log.error("  You can create it manually in the Databricks UI under Compute > Lakebase")
+            log.error("  Then re-run this script or set --lakebase-name to an existing instance.")
+            lakebase_instance = None
+
+    # -------------------------------------------------------------------------
+    # Done
+    # -------------------------------------------------------------------------
     log.info("")
     log.info("=" * 60)
-    log.info("SETUP COMPLETE")
+    log.info("WORKSPACE SETUP COMPLETE")
     log.info("=" * 60)
-    log.info("  Catalog:   %s", cat)
-    log.info("  Schema:    %s.%s", cat, schema)
-    log.info("  VS Index:  %s", index_name)
-    log.info("  Lakebase:  %s", actual_lakebase or "(not provisioned — see warnings above)")
+    log.info("  Catalog:        %s", cat)
+    log.info("  Shared Schema:  %s", schema)
+    log.info("  VS Endpoint:    %s", vs_endpoint)
+    log.info("  VS Index:       %s", index_name)
+    log.info("  Lakebase:       %s  (shared by all participants)", lakebase_name)
+    log.info("  Note: Participants will create their own schemas under %s", cat)
     log.info("")
-    log.info("Share these values with participants:")
-    log.info("")
+    log.info("Give participants these values:")
     log.info("  WORKSHOP_CATALOG=%s", cat)
-    log.info("  LAKEBASE_INSTANCE_NAME=%s", actual_lakebase or lakebase_name)
+    log.info("  LAKEBASE_INSTANCE_NAME=%s", lakebase_name)
+    log.info("  (Each participant creates their own schema under the catalog)")
     log.info("")
-    log.info("Next: share the GitHub repo link and these two values.")
-    log.info("Participants tell Claude their email + these values to begin.")
+    log.info("Next steps:")
+    log.info("  1. Share the GitHub repo link with participants")
+    log.info("  2. Give participants WORKSHOP_CATALOG and LAKEBASE_INSTANCE_NAME")
+    log.info("  3. Participants tell Claude to set up their workspace")
+    log.info("  4. Verify preflight checklist in enablement/instructor_guide.md")
 
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
+    import datetime
     parser = argparse.ArgumentParser(
-        description="Set up the workshop Databricks workspace (self-contained, no external data deps)"
+        description="Set up the workshop Databricks workspace"
     )
-    parser.add_argument(
-        "--profile", default=None,
-        help="Databricks CLI profile (default: uses DEFAULT profile or env vars)."
-             " Most users have DEFAULT. Only set this if you use a named profile."
-    )
-    parser.add_argument(
-        "--warehouse-id", default=None,
-        help="SQL warehouse ID. If omitted, auto-discovers the best available warehouse."
-    )
-    parser.add_argument(
-        "--workshop-catalog", default="cs_agent_workshop",
-        help="Catalog to create for the workshop (default: cs_agent_workshop)."
-             " Change this if that name already exists with unrelated content."
-    )
-    parser.add_argument(
-        "--workshop-schema", default="shared",
-        help="Shared schema within the catalog (default: shared)."
-    )
-    parser.add_argument(
-        "--vs-endpoint", default="cs-workshop-vs-endpoint",
-        help="Vector Search endpoint name (created if it doesn't exist)."
-    )
-    parser.add_argument(
-        "--lakebase-name", default="cs-agent-workshop-memory",
-        help="Lakebase instance name for agent conversation memory (created if needed)."
-    )
+    parser.add_argument("--profile", default="ai-specialist",
+                        help="Databricks CLI profile to use")
+    parser.add_argument("--warehouse-id", default="f45852ca675f5dcb",
+                        help="SQL warehouse ID for DDL/DML")
+    parser.add_argument("--workshop-catalog", default="workshop_catalog",
+                        help="Target catalog to create for the workshop")
+    parser.add_argument("--workshop-schema", default="shared",
+                        help="Target schema to create for the workshop")
+    parser.add_argument("--source-catalog", default="robert_mosley",
+                        help="Source catalog with the original data")
+    parser.add_argument("--source-schema", default="customer_support",
+                        help="Source schema with the original data")
+    parser.add_argument("--vs-endpoint", default="cs-workshop-vs-endpoint",
+                        help="Vector search endpoint name")
+    parser.add_argument("--lakebase-name", default="cs-agent-workshop-memory",
+                        help="Name for the shared Lakebase instance (created if it doesn't exist)")
     args = parser.parse_args()
     setup(args)

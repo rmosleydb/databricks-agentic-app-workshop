@@ -22,13 +22,12 @@ When admin says "set up the workspace" or similar, collect:
 
 Then show the command and confirm before running it the first time:
 
-  python3 'Agentic Apps/retail-customer-service/setup/workspace_setup.py' \
+  python 'Agentic Apps/retail-customer-service/setup/workspace_setup.py' \
     --profile <profile> \
-    --workshop-catalog <catalog>
+    --workshop-catalog <catalog> \
+    --workshop-schema shared
 
 Fixed values: shared schema is always 'shared', VS endpoint is 'cs-workshop-vs-endpoint'.
-No --source-catalog or --warehouse-id needed — the script brings its own data from
-setup/data/ CSVs and auto-discovers a SQL warehouse.
 workspace_setup.py is idempotent — safe to re-run at any time.
 
 ### Onboarding a participant (admin-initiated)
@@ -37,7 +36,7 @@ One participant at a time as they arrive. When admin says "onboard a participant
 or "add a user", ask for the participant's email address, workspace URL, and token,
 then run:
 
-  python3 'Agentic Apps/retail-customer-service/setup/user_setup.py' \
+  python 'Agentic Apps/retail-customer-service/setup/user_setup.py' \
     --workspace-url <url> \
     --user-email <email> \
     --token <token> \
@@ -98,15 +97,13 @@ to the lab. Do not wait for them to ask — proceed through these steps:
 2. Ask: "What is your Databricks workspace URL?
    (e.g. https://adb-1234567890.azuredatabricks.net)"
 3. Ask: "What is your Databricks personal access token?"
-4. Ask: "What is the workshop catalog name? (The instructor should have shared this
-   after running workspace_setup.py — it looks like cs_agent_workshop)"
-5. Run:
+4. Run:
 
-  python3 'Agentic Apps/retail-customer-service/setup/user_setup.py' \
+  python 'Agentic Apps/retail-customer-service/setup/user_setup.py' \
     --workspace-url <url> \
     --user-email <email> \
     --token <token> \
-    --catalog <catalog>
+    --catalog workshop_catalog
 
 5. Derive their schema name and app name using the schema derivation rule:
      jsmith@company.com       -> schema: jsmith,    app: cs-agent-jsmith

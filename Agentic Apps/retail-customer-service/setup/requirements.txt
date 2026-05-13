@@ -1,4 +1,0 @@
-# Workshop setup dependencies
-# Install with: pip install -r setup/requirements.txt
-# Or with uv:   uv pip install -r setup/requirements.txt
-databricks-sdk>=0.28.0
