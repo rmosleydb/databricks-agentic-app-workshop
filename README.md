@@ -85,6 +85,8 @@ uv pip install -r "Agentic Apps/retail-customer-service/setup/requirements.txt"
 
 # 2. Set up the workspace (once per cohort — brings all data from this repo)
 #    No external data dependencies. Discovers your SQL warehouse automatically.
+#    Allow 30-45 minutes on a cold workspace (VS endpoint + index sync).
+#    On a warm workspace (endpoint already exists): ~10 minutes.
 python3 "Agentic Apps/retail-customer-service/setup/workspace_setup.py"
 
 # Optional overrides (see --help for all options):

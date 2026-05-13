@@ -63,6 +63,16 @@ DATA_DIR = os.path.join(SCRIPT_DIR, "data")
 # SQL helper
 # ---------------------------------------------------------------------------
 
+def _fresh_client(profile: str | None):
+    """Return a new WorkspaceClient, forcing token refresh."""
+    from databricks.sdk import WorkspaceClient
+    return WorkspaceClient(profile=profile if profile else None)
+
+
+# Module-level profile reference so poll loops can refresh the client
+_PROFILE: str | None = None
+
+
 def _sql(w, warehouse_id: str, statement: str, description: str = "") -> object:
     from databricks.sdk.service.sql import StatementState
     if description:
@@ -73,13 +83,25 @@ def _sql(w, warehouse_id: str, statement: str, description: str = "") -> object:
         wait_timeout="50s",
     )
     polls = 0
+    consecutive_auth_errors = 0
     while (resp.status and resp.status.state in
            (StatementState.PENDING, StatementState.RUNNING)):
         if polls >= 72:  # 12 minutes max
             raise RuntimeError(f"SQL timed out: {statement[:80]}")
         time.sleep(10)
         polls += 1
-        resp = w.statement_execution.get_statement(resp.statement_id)
+        try:
+            resp = w.statement_execution.get_statement(resp.statement_id)
+            consecutive_auth_errors = 0
+        except Exception as e:
+            if "invalid access token" in str(e).lower() or "401" in str(e):
+                consecutive_auth_errors += 1
+                log.warning("    Auth error on poll %d (token may have expired) — refreshing client...", polls)
+                if consecutive_auth_errors >= 3:
+                    raise RuntimeError("Repeated auth failures — re-run the script to pick up a fresh token.")
+                w = _fresh_client(_PROFILE)
+            else:
+                raise
     if resp.status and resp.status.state != StatementState.SUCCEEDED:
         err = resp.status.error
         raise RuntimeError(
@@ -373,7 +395,7 @@ def inject_bugs(w, wh: str, cat: str, schema: str):
 # Vector Search
 # ---------------------------------------------------------------------------
 
-def setup_vector_search(w, cat: str, schema: str, vs_endpoint: str):
+def setup_vector_search(w, cat: str, schema: str, vs_endpoint: str, profile: str | None):
     from databricks.sdk.service.vectorsearch import (
         EndpointType, VectorIndexType,
         DeltaSyncVectorIndexSpecRequest,
@@ -381,16 +403,23 @@ def setup_vector_search(w, cat: str, schema: str, vs_endpoint: str):
     )
 
     # Endpoint
+    endpoint_existed = False
     try:
         ep = w.vector_search_endpoints.get_endpoint(vs_endpoint)
         log.info("  VS endpoint '%s' already exists (state: %s)",
                  vs_endpoint, ep.endpoint_status.state if ep.endpoint_status else "?")
+        endpoint_existed = True
     except Exception:
-        log.info("  Creating VS endpoint '%s' (can take ~10 minutes)...", vs_endpoint)
+        pass
+
+    if not endpoint_existed:
+        log.info("  Creating VS endpoint '%s'...", vs_endpoint)
+        log.info("  NOTE: On a cold workspace this can take 20-30 minutes.")
+        log.info("  The script will wait — do not interrupt it.")
         w.vector_search_endpoints.create_endpoint_and_wait(
             name=vs_endpoint,
             endpoint_type=EndpointType.STANDARD,
-            timeout=datetime.timedelta(minutes=30),
+            timeout=datetime.timedelta(minutes=40),
         )
         log.info("  VS endpoint ready.")
 
@@ -432,19 +461,47 @@ def setup_vector_search(w, cat: str, schema: str, vs_endpoint: str):
                 ],
             ),
         )
-        log.info("  Waiting for VS index to sync (~10 minutes)...")
-        for _ in range(40):
+        log.info("  VS index creation triggered.")
+        log.info("  Waiting for sync to complete — this typically takes 10-20 minutes.")
+        log.info("  (If the endpoint was just created, allow up to 30 minutes total.)")
+
+        phase = "provisioning"
+        consecutive_auth_errors = 0
+        for attempt in range(60):  # up to 30 minutes
             time.sleep(30)
             try:
                 idx = w.vector_search_indexes.get_index(index_name)
+                consecutive_auth_errors = 0
+
                 if idx.status and getattr(idx.status, "ready", False):
                     n = getattr(idx.status, "indexed_row_count", "?")
                     log.info("  VS index ready — %s rows indexed.", n)
                     break
-                msg = getattr(idx.status, "message", "syncing") if idx.status else "no status"
-                log.info("    ... %s", msg)
+
+                msg = (getattr(idx.status, "message", "") or "") if idx.status else ""
+                # Distinguish endpoint provisioning from active syncing
+                if "pending" in msg.lower() or "provisioning" in msg.lower():
+                    if phase != "provisioning":
+                        phase = "provisioning"
+                    log.info("  [%d/60] Endpoint provisioning: %s", attempt + 1, msg or "waiting...")
+                else:
+                    if phase != "syncing":
+                        phase = "syncing"
+                        log.info("  Endpoint ready — index sync now in progress...")
+                    log.info("  [%d/60] Syncing: %s", attempt + 1, msg or "in progress...")
+
             except Exception as e:
-                log.warning("    Could not check index state: %s", e)
+                if "invalid access token" in str(e).lower() or "401" in str(e):
+                    consecutive_auth_errors += 1
+                    log.warning("  Auth error on VS poll (token expired) — refreshing client...")
+                    if consecutive_auth_errors >= 3:
+                        log.error("  Repeated auth failures during VS index poll.")
+                        log.error("  Re-run the script — the index will continue syncing in the background.")
+                        log.error("  Re-run is idempotent and will skip steps already completed.")
+                        break
+                    w = _fresh_client(profile)
+                else:
+                    log.warning("  Could not check index state: %s", e)
 
     return index_name
 
@@ -487,10 +544,12 @@ def provision_lakebase(w, lakebase_name: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 def setup(args):
+    global _PROFILE
     from databricks.sdk import WorkspaceClient
 
     log.info("Connecting to Databricks workspace...")
-    w = WorkspaceClient(profile=args.profile if args.profile else None)
+    _PROFILE = args.profile if args.profile else None
+    w = WorkspaceClient(profile=_PROFILE)
     me = w.current_user.me()
     log.info("Authenticated as: %s", me.user_name)
     log.info("Workspace:        %s", w.config.host)
@@ -538,7 +597,7 @@ def setup(args):
     # ── Step 5: vector search ─────────────────────────────────────────────
     log.info("")
     log.info("Step 5: Setting up Vector Search...")
-    index_name = setup_vector_search(w, cat, schema, vs_endpoint)
+    index_name = setup_vector_search(w, cat, schema, vs_endpoint, args.profile)
 
     # ── Step 6: permissions ────────────────────────────────────────────────
     log.info("")
@@ -562,21 +621,33 @@ def setup(args):
 
     # ── Summary ────────────────────────────────────────────────────────────
     log.info("")
-    log.info("=" * 60)
-    log.info("SETUP COMPLETE")
-    log.info("=" * 60)
+    lakebase_ok = actual_lakebase is not None
+    if lakebase_ok:
+        log.info("=" * 60)
+        log.info("SETUP COMPLETE")
+        log.info("=" * 60)
+    else:
+        log.error("=" * 60)
+        log.error("SETUP INCOMPLETE — Lakebase provisioning failed")
+        log.error("The agent will start without conversation memory.")
+        log.error("Fix the Lakebase issue and re-run before the workshop.")
+        log.error("=" * 60)
+
     log.info("  Catalog:   %s", cat)
     log.info("  Schema:    %s.%s", cat, schema)
     log.info("  VS Index:  %s", index_name)
-    log.info("  Lakebase:  %s", actual_lakebase or "(not provisioned — see warnings above)")
+    log.info("  Lakebase:  %s", actual_lakebase or "FAILED — see errors above")
     log.info("")
     log.info("Share these values with participants:")
     log.info("")
     log.info("  WORKSHOP_CATALOG=%s", cat)
-    log.info("  LAKEBASE_INSTANCE_NAME=%s", actual_lakebase or lakebase_name)
+    log.info("  LAKEBASE_INSTANCE_NAME=%s", actual_lakebase or "(not available)")
     log.info("")
     log.info("Next: share the GitHub repo link and these two values.")
     log.info("Participants tell Claude their email + these values to begin.")
+
+    if not lakebase_ok:
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
