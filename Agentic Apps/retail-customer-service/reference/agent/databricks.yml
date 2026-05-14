@@ -1,10 +1,31 @@
 bundle:
   name: cs_agent_workshop
 
+variables:
+  catalog:
+    description: "Workshop catalog (set by user_setup.py)"
+    default: "cs_agent_workshop"
+  schema:
+    description: "Your UC schema for UC Functions (set by user_setup.py)"
+    default: "shared"
+  lakebase_instance:
+    description: "Shared Lakebase instance name (set by user_setup.py)"
+    default: "cs-agent-workshop-memory"
+  lakebase_schema:
+    description: "Per-user Postgres schema in Lakebase for conversation memory (set by user_setup.py)"
+    default: ""
+  app_name:
+    description: "Your Databricks App name — cs-agent-<username> (set by user_setup.py)"
+    default: "cs-agent-workshop"
+
 resources:
+  experiments:
+    cs_agent_workshop_experiment:
+      name: /Users/${workspace.current_user.userName}/cs-agent-workshop-${bundle.target}
+
   apps:
     cs_agent:
-      name: "cs-agent-robert-mosley"
+      name: "${var.app_name}"
       description: "TechMart customer service agent (workshop)"
       source_code_path: ./
       config:
@@ -23,13 +44,13 @@ resources:
           - name: MLFLOW_EXPERIMENT_ID
             value_from: "experiment"
           - name: LAKEBASE_INSTANCE_NAME
-            value: "DONOTDELETE-vibe-coding-workshop-lakebase"
+            value: "${var.lakebase_instance}"
           - name: LAKEBASE_AGENT_MEMORY_SCHEMA
-            value: "cs_agent_workshop_robert_mosley"
+            value: "${var.lakebase_schema}"
           - name: WORKSHOP_CATALOG
-            value: "cs_agent_workshop"
+            value: "${var.catalog}"
           - name: WORKSHOP_SCHEMA
-            value: "robert_mosley"
+            value: "${var.schema}"
           - name: LOG_LEVEL
             value: "INFO"
           - name: DATABRICKS_EMBEDDING_ENDPOINT
@@ -38,36 +59,36 @@ resources:
       resources:
         - name: 'experiment'
           experiment:
-            experiment_id: "4360790536598970"
+            experiment_id: ${resources.experiments.cs_agent_workshop_experiment.experiment_id}
             permission: 'CAN_MANAGE'
         - name: 'database'
           database:
-            instance_name: 'DONOTDELETE-vibe-coding-workshop-lakebase'
+            instance_name: "${var.lakebase_instance}"
             database_name: 'databricks_postgres'
             permission: 'CAN_CONNECT_AND_CREATE'
         - name: 'fn_product_lookup'
           uc_securable:
-            securable_full_name: 'cs_agent_workshop.robert_mosley.product_lookup'
+            securable_full_name: "${var.catalog}.${var.schema}.product_lookup"
             securable_type: 'FUNCTION'
             permission: 'EXECUTE'
         - name: 'fn_get_product_details'
           uc_securable:
-            securable_full_name: 'cs_agent_workshop.robert_mosley.get_product_details'
+            securable_full_name: "${var.catalog}.${var.schema}.get_product_details"
             securable_type: 'FUNCTION'
             permission: 'EXECUTE'
         - name: 'fn_get_order_status'
           uc_securable:
-            securable_full_name: 'cs_agent_workshop.robert_mosley.get_order_status'
+            securable_full_name: "${var.catalog}.${var.schema}.get_order_status"
             securable_type: 'FUNCTION'
             permission: 'EXECUTE'
         - name: 'fn_get_return_policy'
           uc_securable:
-            securable_full_name: 'cs_agent_workshop.robert_mosley.get_return_policy'
+            securable_full_name: "${var.catalog}.${var.schema}.get_return_policy"
             securable_type: 'FUNCTION'
             permission: 'EXECUTE'
         - name: 'vs_product_docs'
           uc_securable:
-            securable_full_name: 'cs_agent_workshop.shared.product_docs_vs'
+            securable_full_name: "${var.catalog}.shared.product_docs_vs"
             securable_type: 'TABLE'
             permission: 'SELECT'
 
@@ -81,4 +102,4 @@ targets:
     resources:
       apps:
         cs_agent:
-          name: cs-agent-robert-mosley
+          name: "${var.app_name}"
