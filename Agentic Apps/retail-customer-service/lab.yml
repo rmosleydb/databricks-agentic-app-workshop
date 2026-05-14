@@ -37,7 +37,7 @@ steps:
     duration_minutes: 15
     description: >
       Query Unity Catalog tables to understand the TechMart data: products,
-      product_docs, orders, customers, policies, and the vector search index.
+      product_docs, orders, policies, and the vector search index.
       Identify anomalies that will later cause agent quality issues.
 
   - id: build
@@ -106,7 +106,7 @@ quality_issues_planted:
 
 required_resources:
   - type: unity_catalog
-    description: "Catalog and schema with products, product_docs, orders, customers, policies tables"
+    description: "Catalog and schema with products, product_docs, orders, policies tables"
     provisioned_by: workspace_setup.py
 
   - type: vector_search_index

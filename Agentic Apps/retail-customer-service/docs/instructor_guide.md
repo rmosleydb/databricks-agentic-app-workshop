@@ -69,7 +69,7 @@ databricks tables list \
   --catalog-name <catalog-name> \
   --schema-name shared
 
-# Expected: products, product_docs, customers, orders, order_details, policies
+# Expected: products, product_docs, orders, policies
 
 # 2. Vector search index is ONLINE
 databricks vector-search indexes get \

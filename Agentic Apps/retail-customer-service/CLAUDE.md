@@ -76,7 +76,7 @@ Navigate to Unity Catalog in the Databricks UI (left nav > Catalog). Browse
 to the {{CATALOG}}.shared schema. Click on each table to explore it — use
 the Sample Data tab to see rows without running any code.
 
-Tables to explore: products, product_docs, orders, customers, policies,
+Tables to explore: products, product_docs, orders, policies,
 and the product_docs_vs vector search index.
 
 If you want to run SQL to dig deeper, use the SQL Editor (left nav > SQL
@@ -119,7 +119,7 @@ participant's personal schema so they don't collide with others.
 **What to tell Claude**
 - Your catalog and schema: {{CATALOG}}.{{SCHEMA}}
 - Where the data lives: {{CATALOG}}.shared
-- What tables exist: products, product_docs, orders, customers, policies
+- What tables exist: products, product_docs, orders, policies
 - What each function should do (in plain language — Claude writes the SQL)
   - product_lookup: semantic search over product docs using the vector search index
   - get_product_details: structured lookup for a specific product by name
@@ -129,7 +129,7 @@ participant's personal schema so they don't collide with others.
 **Sample prompt**
   Create 4 UC Functions in {{CATALOG}}.{{SCHEMA}} as tools for a customer
   service agent. The data is in {{CATALOG}}.shared and has these tables:
-  products, product_docs, orders, customers, policies. There is also a
+  products, product_docs, orders, policies. There is also a
   vector search index at {{CATALOG}}.shared.product_docs_vs.
 
   I need these 4 functions:
@@ -137,8 +137,9 @@ participant's personal schema so they don't collide with others.
      the vector search index, returns top 5 results with relevance scores
   2. get_product_details(product_name STRING) — structured lookup on the
      products table, returns price, category, discontinued status
-  3. get_order_status(order_id STRING) — joins orders and customers tables,
-     returns order status and customer name
+  3. get_order_status(order_id STRING) — looks up an order from the orders
+     table (which includes customer_email and shipping_address), returns
+     order status and customer info
   4. get_return_policy() — fetches the return policy from the policies table
 
   Create all 4 functions in {{CATALOG}}.{{SCHEMA}}.
