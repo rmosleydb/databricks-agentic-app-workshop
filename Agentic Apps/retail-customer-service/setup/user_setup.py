@@ -7,19 +7,24 @@ What this script does:
   1. Creates a per-user schema under the workshop catalog
   2. Reads CLAUDE.md and substitutes template variables with the user's values
   3. Uploads modified CLAUDE.md to the user's Databricks workspace files
-  4. Creates starter app.yaml in the user's workspace
+  4. Creates starter app.yaml in the user's workspace (includes LAKEBASE_SCHEMA)
 
 Usage:
-    python "Agentic Apps/retail-customer-service/setup/user_setup.py" \\
+    python3 "Agentic Apps/retail-customer-service/setup/user_setup.py" \\
         --workspace-url https://dbc-9dcd6158-e299.cloud.databricks.com \\
         --user-email attendee@company.com \\
         --token dapi... \\
-        --catalog workshop_catalog \\
-        --schema attendee_schema \\
+        --catalog cs_agent_workshop \\
+        [--lakebase-name cs-agent-workshop-memory] \\
+        [--lakebase-schema cs_agent_workshop] \\
         [--dry-run]
 
-The catalog-level schema format is: first letter of first name + last name
-e.g. jsmith for John Smith <jsmith@company.com>
+Schema derivation rule:
+  jsmith@company.com       -> UC schema: jsmith,      Lakebase schema: cs_agent_workshop_jsmith
+  first.last@company.com   -> UC schema: first_last,  Lakebase schema: cs_agent_workshop_first_last
+
+Each user gets an isolated Postgres schema in Lakebase so checkpoint tables
+don't collide across participants or workshops.
 """
 
 import argparse
@@ -96,11 +101,19 @@ def setup_user(args):
     token = args.token
     catalog = args.catalog
     schema = args.schema or derive_schema_name(email)
-    username = email.split("@")[0]
+    username = derive_schema_name(email)  # same derivation as schema
+
+    # Per-user Postgres schema in Lakebase:
+    # <lakebase_schema_prefix>_<username>
+    # e.g. cs_agent_workshop_jsmith
+    # This namespaces each user's checkpoint tables so they're isolated and droppable.
+    lakebase_schema_prefix = args.lakebase_schema or catalog
+    lakebase_pg_schema = f"{lakebase_schema_prefix}_{username}"
 
     log.info("Setting up user: %s", email)
-    log.info("  Catalog: %s", catalog)
-    log.info("  Schema:  %s", schema)
+    log.info("  Catalog:         %s", catalog)
+    log.info("  UC Schema:       %s", schema)
+    log.info("  Lakebase schema: %s (Postgres schema for memory isolation)", lakebase_pg_schema)
 
     # -------------------------------------------------------------------------
     # Read and fill CLAUDE.md template
@@ -120,6 +133,7 @@ def setup_user(args):
         "{{USERNAME}}": username,
         "{{WORKSPACE_URL}}": workspace_url,
         "{{LAKEBASE_INSTANCE}}": args.lakebase_name,
+        "{{LAKEBASE_SCHEMA}}": lakebase_pg_schema,
     }
     for placeholder, value in replacements.items():
         claude_md = claude_md.replace(placeholder, value)
@@ -140,6 +154,8 @@ env:
     value: "databricks-claude-sonnet-4-6"
   - name: MLFLOW_EXPERIMENT
     value: "/Users/{email}/cs-agent-workshop"
+  - name: LAKEBASE_SCHEMA
+    value: "{lakebase_pg_schema}"
 """
 
     if args.dry_run:
@@ -175,6 +191,9 @@ env:
     log.info("  Uploaded app.yaml to %s", yaml_path)
 
     log.info("User setup complete for %s", email)
+    log.info("  UC schema:       %s.%s", catalog, schema)
+    log.info("  Lakebase schema: %s", lakebase_pg_schema)
+    log.info("  App name:        cs-agent-%s", username)
     return 0
 
 
@@ -186,12 +205,15 @@ if __name__ == "__main__":
                         help="User email address")
     parser.add_argument("--token", required=True,
                         help="Databricks PAT for this user")
-    parser.add_argument("--catalog", default="workshop_catalog",
+    parser.add_argument("--catalog", default="cs_agent_workshop",
                         help="Workshop catalog name")
     parser.add_argument("--schema", default=None,
                         help="Workshop schema name (derived from email if not set)")
     parser.add_argument("--lakebase-name", default="cs-agent-workshop-memory",
                         help="Lakebase instance name for conversation memory")
+    parser.add_argument("--lakebase-schema", default=None,
+                        help="Lakebase schema prefix (defaults to catalog name). "
+                             "Per-user schema will be <prefix>_<username>.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print what would happen without making changes")
     args = parser.parse_args()
