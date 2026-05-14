@@ -66,11 +66,16 @@ Difficulty: intermediate
 ## For Instructors
 
 Before the workshop, run workspace_setup.py once to create the shared
-Unity Catalog objects, Vector Search index, and MLflow experiment.
+Unity Catalog objects, Vector Search index, and Lakebase instance. It loads
+all source data from bundled CSVs — no external catalog required. When it
+finishes it writes `setup/setup-state.json` with the catalog name and
+Lakebase instance name. Commit that file or share it with participants
+alongside the repo link.
 
-user_setup.py is now participant-triggered: each attendee runs it themselves
-via Claude Code during self-onboarding. It generates their personal CLAUDE.md
-with live workspace values injected (catalog, schema, Lakebase instance, etc.).
+user_setup.py is participant-triggered: each attendee runs it themselves
+via Claude Code during self-onboarding. It reads setup-state.json for
+defaults, creates the participant's UC schema, and uploads a personalised
+CLAUDE.md and app.yaml to their Databricks workspace.
 
 See `Agentic Apps/retail-customer-service/docs/instructor_guide.md` for
 full facilitation notes, timing guidance, and debrief talking points.
@@ -95,11 +100,12 @@ python3 "Agentic Apps/retail-customer-service/setup/workspace_setup.py" \
   --workshop-catalog cs_agent_workshop
 
 # 3. Onboard a participant
+#    --catalog and --lakebase-name are read automatically from setup-state.json
+#    (written by workspace_setup.py). Only token + URL + email required.
 python3 "Agentic Apps/retail-customer-service/setup/user_setup.py" \
   --workspace-url https://adb-xxxx.azuredatabricks.net \
   --user-email alice@company.com \
-  --token my_token \
-  --catalog cs_agent_workshop
+  --token my_token
 ```
 
 ---
