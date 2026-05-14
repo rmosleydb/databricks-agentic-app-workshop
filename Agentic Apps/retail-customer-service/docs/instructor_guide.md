@@ -14,29 +14,33 @@ that most teams take weeks to figure out."
 ### T-24 hours: Run workspace setup
 
 Run this once the day before (or at least an hour before the workshop).
-The Lakebase instance takes ~5 minutes to provision, so don't leave it to the last minute.
+Allow 30-45 min on a cold workspace (VS endpoint + index sync takes time).
+On a warm workspace where the VS endpoint already exists: ~10 minutes.
 
 ```bash
-cd databricks-cs-agent-workshop
+cd databricks-agentic-app-workshop
 
-python orchestration/workspace_setup.py \
+# Install deps (one-time)
+pip install -r "Agentic Apps/retail-customer-service/setup/requirements.txt"
+
+# Run setup — brings all data from repo CSVs, auto-discovers a SQL warehouse
+python3 "Agentic Apps/retail-customer-service/setup/workspace_setup.py" \
     --profile <your-databricks-profile> \
-    --workshop-catalog <catalog-name> \
-    --workshop-schema shared \
-    --source-catalog robert_mosley \
-    --source-schema customer_support \
-    --lakebase-name cs-agent-workshop-memory
+    --workshop-catalog cs_agent_workshop
 ```
 
-At the end, the script prints three values — **share these with participants** at the start:
+All source data (products, orders, policies) is bundled in `setup/data/` — no
+external catalog needed. The script is fully idempotent: safe to re-run.
+
+When complete the script prints the values participants need **and** writes them
+to `setup/setup-state.json`. Commit that file (or share it with participants
+alongside the repo) — user_setup.py reads it automatically so participants
+don't have to type catalog names or Lakebase instance names manually.
 
 ```
-WORKSHOP_CATALOG=<catalog-name>
-WORKSHOP_SCHEMA=shared
+WORKSHOP_CATALOG=cs_agent_workshop
 LAKEBASE_INSTANCE_NAME=cs-agent-workshop-memory
 ```
-
-These values are injected into each participant's CLAUDE.md by user_setup.py. Claude uses them automatically when building the agent.
 
 ### T-24 hours: Deploy the reference implementation
 
@@ -81,8 +85,10 @@ databricks vector-search indexes get \
 # 4. Lakebase instance is AVAILABLE
 python3 -c "
 from databricks.sdk import WorkspaceClient
+import json, pathlib
+state = json.loads(pathlib.Path('Agentic Apps/retail-customer-service/setup/setup-state.json').read_text())
 w = WorkspaceClient()
-inst = w.database.get_database_instance('cs-agent-workshop-memory')
+inst = w.database.get_database_instance(state['lakebase_instance_name'])
 print(inst.name, inst.state)
 "
 # Expected: cs-agent-workshop-memory DatabaseInstanceState.AVAILABLE
@@ -159,6 +165,7 @@ This is where people will need the most help. Watch for:
 | Problem | Likely Cause | Fix |
 |---------|--------------|-----|
 | UCFunctionToolkit raises AnalysisException | Permission not granted | Run GRANT EXECUTE in SQL |
+| UC schema doesn't exist | user_setup.py failed silently | Re-run user_setup.py; check for CREATE SCHEMA error in output |
 | App deployment fails with "app limit exceeded" | Workspace has too many apps | Point them to shared app URL |
 | `databricks apps deploy` hangs | Workspace sync still running | Wait 60s, try again |
 | LangGraph import error | Wrong package version | `pip install databricks-langchain langgraph` |
