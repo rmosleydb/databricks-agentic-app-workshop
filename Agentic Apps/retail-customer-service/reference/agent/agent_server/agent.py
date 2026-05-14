@@ -1,155 +1,141 @@
-"""
-TechMart Customer Support Agent — Workshop Blueprint
-
-This agent is INTENTIONALLY built without quality guardrails.
-Participants will discover the issues in Step 3 (tracing) and
-Step 4 (evaluation), then fix them in Step 5.
-
-Architecture:
-  - LangGraph create_react_agent
-  - DatabricksMCPServer for UC Function tools (product_lookup, get_product_details,
-    get_order_status, get_return_policy)
-  - AsyncCheckpointSaver (Lakebase) for short-term / in-session memory
-    (graceful fallback to stateless if Lakebase is unavailable locally)
-  - MLflow tracing via mlflow.langchain.autolog()
-  - Served via mlflow.genai.start_server (@invoke / @stream decorators)
-"""
-
 import logging
-import os
-from typing import AsyncGenerator
+from datetime import datetime
+from typing import Any, AsyncGenerator, Optional, Sequence, TypedDict
 
 import mlflow
-from databricks_langchain import (
-    AsyncCheckpointSaver,
-    ChatDatabricks,
-    DatabricksMCPServer,
-    DatabricksMultiServerMCPClient,
-)
-from langgraph.prebuilt import create_react_agent
+from databricks.sdk import WorkspaceClient
+from databricks_langchain import ChatDatabricks
+from fastapi import HTTPException
+from langchain.agents import create_agent
+from langchain_core.messages import AnyMessage
+from langchain_core.tools import tool
+from langgraph.graph.message import add_messages
+from langgraph.store.base import BaseStore
 from mlflow.genai.agent_server import invoke, stream
 from mlflow.types.responses import (
     ResponsesAgentRequest,
     ResponsesAgentResponse,
     ResponsesAgentStreamEvent,
+    to_chat_completions_input,
+)
+from typing_extensions import Annotated
+
+from agent_server.prompts import SYSTEM_PROMPT
+from agent_server.utils import (
+    _get_or_create_thread_id,
+    get_user_workspace_client,
+    init_mcp_client,
+    process_agent_astream_events,
+)
+from agent_server.utils_memory import (
+    get_lakebase_access_error_message,
+    get_user_id,
+    init_lakebase_config,
+    lakebase_context,
+    memory_tools,
 )
 
-from agent_server.memory_tools import get_user_id, memory_tools
-from agent_server.utils import get_messages_and_context, process_agent_astream_events
+logger = logging.getLogger(__name__)
+mlflow.langchain.autolog()
+logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
+sp_workspace_client = WorkspaceClient()
 
-log = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-CATALOG           = os.environ.get("WORKSHOP_CATALOG", "robert_mosley")
-SCHEMA            = os.environ.get("WORKSHOP_SCHEMA",  "shared")
-LLM_ENDPOINT      = os.environ.get("LLM_ENDPOINT",     "databricks-claude-sonnet-4-6")
-LAKEBASE_INSTANCE = os.environ.get("LAKEBASE_INSTANCE_NAME", "cs-agent-workshop-memory")
-LAKEBASE_SCHEMA   = os.environ.get("LAKEBASE_SCHEMA", None)  # per-user Postgres schema
-DATABRICKS_HOST   = os.environ.get("DATABRICKS_HOST", "")
-
-# ---------------------------------------------------------------------------
-# System prompt — no guardrails (intentional for the workshop)
-# ---------------------------------------------------------------------------
-SYSTEM_PROMPT = f"""You are a helpful customer support agent for TechMart, a technology retailer.
-You assist customers with questions about products, orders, returns, and store policies.
-
-You have access to tools to look up:
-- Product information and specifications (product_lookup, get_product_details)
-- Order status and tracking (get_order_status)
-- Return and warranty policy (get_return_policy)
-- Your memory of past conversations with this customer (get_user_memory, save_user_memory)
-
-When answering questions:
-1. Always search the product knowledge base first for product questions
-2. Be helpful and provide complete, confident answers based on what you find
-3. For order questions, look up the specific order
-4. If you remember something relevant about the customer, mention it
-
-Always be helpful. The customer catalog is: {CATALOG}.{SCHEMA}
-"""
-
-# MCP tool source — UC functions exposed via DatabricksMultiServerMCPClient
-uc_mcp_server = DatabricksMCPServer.from_uc_function(
-    catalog=CATALOG,
-    schema=SCHEMA,
-    name="techmart_tools",
-)
-uc_mcp_client = DatabricksMultiServerMCPClient([uc_mcp_server])
-
-model = ChatDatabricks(endpoint=LLM_ENDPOINT)
+LLM_ENDPOINT_NAME = "databricks-gpt-5-4"
+LAKEBASE_CONFIG = init_lakebase_config()
 
 
-async def init_agent(tools):
-    """Build the react agent with all tools."""
-    return create_react_agent(
+@tool
+def get_current_time() -> str:
+    """Get the current date and time."""
+    return datetime.now().isoformat()
+
+
+class StatefulAgentState(TypedDict, total=False):
+    messages: Annotated[Sequence[AnyMessage], add_messages]
+    custom_inputs: dict[str, Any]
+    custom_outputs: dict[str, Any]
+
+
+async def init_agent(
+    store: BaseStore,
+    workspace_client: Optional[WorkspaceClient] = None,
+    checkpointer: Optional[Any] = None,
+):
+    tools = [get_current_time] + memory_tools()
+    mcp_client = init_mcp_client(workspace_client or sp_workspace_client)
+    try:
+        tools.extend(await mcp_client.get_tools())
+    except Exception:
+        logger.warning("Failed to fetch MCP tools. Continuing without MCP tools.", exc_info=True)
+
+    model = ChatDatabricks(endpoint=LLM_ENDPOINT_NAME)
+
+    return create_agent(
         model=model,
         tools=tools,
-        prompt=SYSTEM_PROMPT,
+        system_prompt=SYSTEM_PROMPT,
+        checkpointer=checkpointer,
+        store=store,
+        state_schema=StatefulAgentState,
     )
 
 
-# ---------------------------------------------------------------------------
-# Agent entry points
-# ---------------------------------------------------------------------------
-
 @invoke()
-async def non_streaming(request: ResponsesAgentRequest) -> ResponsesAgentResponse:
+async def invoke_handler(request: ResponsesAgentRequest) -> ResponsesAgentResponse:
     outputs = [
         event.item
-        async for event in streaming(request)
+        async for event in stream_handler(request)
         if event.type == "response.output_item.done"
     ]
-    return ResponsesAgentResponse(output=outputs)
+
+    custom_outputs: dict[str, Any] = {}
+    if user_id := get_user_id(request):
+        custom_outputs["user_id"] = user_id
+    return ResponsesAgentResponse(output=outputs, custom_outputs=custom_outputs)
 
 
 @stream()
-async def streaming(
+async def stream_handler(
     request: ResponsesAgentRequest,
 ) -> AsyncGenerator[ResponsesAgentStreamEvent, None]:
-    messages, context = get_messages_and_context(request)
-    user_id   = get_user_id(request)
-    thread_id = (context.get("conversation_id") or user_id or "default")
+    thread_id = _get_or_create_thread_id(request)
+    mlflow.update_current_trace(metadata={"mlflow.trace.session": thread_id})
 
-    # UC function tools via MCP + memory tools
-    uc_tools  = await uc_mcp_client.get_tools()
-    all_tools = uc_tools + memory_tools()
+    user_id = get_user_id(request)
+    if not user_id:
+        logger.warning("No user_id provided - memory features will not be available")
 
-    # Try to use Lakebase checkpointing for conversation memory.
-    # Falls back to stateless if Lakebase is unavailable (e.g. running locally
-    # where the caller's Databricks identity hasn't been provisioned as a
-    # Postgres role on the shared instance).
-    checkpointer = None
-    config: dict = {}
+    config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+    if user_id:
+        config["configurable"]["user_id"] = user_id
+
+    input_state: dict[str, Any] = {
+        "messages": to_chat_completions_input([i.model_dump() for i in request.input]),
+        "custom_inputs": dict(request.custom_inputs or {}),
+    }
+
     try:
-        checkpointer = await AsyncCheckpointSaver(
-            instance_name=LAKEBASE_INSTANCE,
-            schema=LAKEBASE_SCHEMA,  # None → 'public'; set to per-user schema in production
-        ).__aenter__()
-        config = {
-            "configurable": {
-                "thread_id": thread_id,
-                "user_id": user_id,
-            }
-        }
-        log.debug("Lakebase checkpointer active (instance=%s, schema=%s, thread_id=%s)",
-                  LAKEBASE_INSTANCE, LAKEBASE_SCHEMA, thread_id)
+        async with lakebase_context(LAKEBASE_CONFIG) as (checkpointer, store):
+            config["configurable"]["store"] = store
+
+            # By default, uses service principal credentials.
+            # For on-behalf-of user authentication, pass get_user_workspace_client() to init_agent.
+            agent = await init_agent(store=store, checkpointer=checkpointer)
+
+            async for event in process_agent_astream_events(
+                agent.astream(input_state, config, stream_mode=["updates", "messages"])
+            ):
+                yield event
     except Exception as e:
-        log.warning(
-            "AsyncCheckpointSaver unavailable (%s) — running stateless. "
-            "This is normal when running locally without a provisioned Postgres role.",
-            e,
-        )
-
-    agent = await init_agent(all_tools)
-
-    if checkpointer is not None:
-        runnable = agent.with_config(checkpointer=checkpointer)
-    else:
-        runnable = agent
-
-    async for event in process_agent_astream_events(
-        runnable.astream({"messages": messages}, config, stream_mode=["updates", "messages"])
-    ):
-        yield event
+        error_msg = str(e).lower()
+        # Check for Lakebase access/connection errors
+        if any(
+            keyword in error_msg
+            for keyword in ["lakebase", "pg_hba", "postgres", "database instance"]
+        ):
+            logger.error("Lakebase access error: %s", e)
+            raise HTTPException(
+                status_code=503,
+                detail=get_lakebase_access_error_message(LAKEBASE_CONFIG.description),
+            ) from e
+        raise
