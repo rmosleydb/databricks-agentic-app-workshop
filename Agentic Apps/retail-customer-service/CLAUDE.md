@@ -156,10 +156,10 @@ Click each function to see its signature and SQL body.
 **What they're building**
 A LangGraph customer service agent that uses those UC Functions as MCP tools,
 Lakebase for conversation memory, and MLflow for tracing. The agent is
-scaffolded from the Databricks agent-langgraph app template.
+scaffolded from the Databricks agent-langgraph-advanced app template.
 
 **What to tell Claude**
-- Use the databricks/app-templates agent-langgraph template as the starting point
+- Use the databricks/app-templates agent-langgraph-advanced template as the starting point
 - Use Lakebase for conversation memory (AsyncCheckpointSaver), isolate by thread_id
 - Use the 4 UC Functions just created as MCP tools via DatabricksMCPServer
 - The UC Functions are in {{CATALOG}}.{{SCHEMA}}
@@ -167,15 +167,17 @@ scaffolded from the Databricks agent-langgraph app template.
 - It should be deployed as a Databricks App
 
 **Architecture Claude will wire up:**
-- UC Functions become MCP tools via DatabricksMCPServer.from_uc_function()
-- DatabricksMultiServerMCPClient fetches the tool schemas at runtime
+- UC Functions become MCP tools via DatabricksMCPServer / DatabricksMultiServerMCPClient
 - create_react_agent() wires model + tools + system prompt
-- mlflow.genai.start_server() handles the HTTP endpoint and tracing
-- AsyncCheckpointSaver (Lakebase) gives per-conversation memory via thread_id
-- databricks.yml declares the bundle: app, experiment, database resource
+- LongRunningAgentServer (enable_chat_proxy=True) serves the agent with a built-in
+  chat UI at / and the API at /invocations
+- lakebase_context() manages the AsyncCheckpointSaver + store for per-conversation
+  memory, isolated by thread_id and per-user Lakebase schema
+- MLflow tracing via mlflow.langchain.autolog()
+- databricks.yml declares the bundle: app, experiment, postgres (Lakebase) resource
 
 **Sample prompt**
-  Build me a customer service agent using the Databricks agent-langgraph app
+  Build me a customer service agent using the Databricks agent-langgraph-advanced app
   template. The agent is for TechMart, an electronics retailer.
 
   Use Lakebase for conversation memory (AsyncCheckpointSaver), isolating
