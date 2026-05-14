@@ -646,6 +646,22 @@ def setup(args):
     log.info("Next: share the GitHub repo link and these two values.")
     log.info("Participants tell Claude their email + these values to begin.")
 
+    # Write setup-state.json so participant onboarding can discover these values
+    # without the instructor having to copy/paste them manually.
+    import json as _json
+    state = {
+        "workshop_catalog": cat,
+        "workshop_schema": schema,
+        "lakebase_instance_name": actual_lakebase or "",
+        "vs_endpoint": vs_endpoint,
+        "vs_index": f"{cat}.{schema}.product_docs_vs",
+    }
+    state_path = os.path.join(SCRIPT_DIR, "setup-state.json")
+    with open(state_path, "w") as _f:
+        _json.dump(state, _f, indent=2)
+    log.info("  Saved setup state to %s", state_path)
+    log.info("  (commit this file or share it with participants alongside the repo)")
+
     if not lakebase_ok:
         sys.exit(1)
 

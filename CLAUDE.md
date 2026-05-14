@@ -34,14 +34,17 @@ workspace_setup.py is idempotent — safe to re-run at any time.
 ### Onboarding a participant (admin-initiated)
 
 One participant at a time as they arrive. When admin says "onboard a participant"
-or "add a user", ask for the participant's email address, workspace URL, and token,
-then run:
+or "add a user", ask for the participant's email address, workspace URL, and token.
+Read setup/setup-state.json to get the catalog and lakebase_instance_name — these
+were written by workspace_setup.py. Then run:
 
   python3 'Agentic Apps/retail-customer-service/setup/user_setup.py' \
     --workspace-url <url> \
     --user-email <email> \
     --token <token> \
-    --catalog <catalog>
+    --lakebase-name <lakebase_instance_name>
+
+(--catalog defaults from setup-state.json automatically)
 
 Schema derivation rule:
   jsmith@company.com          -> jsmith
@@ -98,22 +101,29 @@ to the lab. Do not wait for them to ask — proceed through these steps:
 2. Ask: "What is your Databricks workspace URL?
    (e.g. https://adb-1234567890.azuredatabricks.net)"
 3. Ask: "What is your Databricks personal access token?"
-4. Ask: "What is the workshop catalog name? (The instructor should have shared this
-   after running workspace_setup.py — it looks like cs_agent_workshop)"
+4. Check whether setup/setup-state.json exists in the repo. If it does, read it
+   and use workshop_catalog and lakebase_instance_name as the defaults — no need
+   to ask the participant for these values.
+   If setup-state.json is missing or has no lakebase_instance_name, ask:
+   "What is the workshop catalog name and Lakebase instance name?
+   (The instructor should have shared these after running workspace_setup.py)"
 5. Run:
 
   python3 'Agentic Apps/retail-customer-service/setup/user_setup.py' \
     --workspace-url <url> \
     --user-email <email> \
     --token <token> \
-    --catalog <catalog>
+    --lakebase-name <lakebase_instance_name>
 
-5. Derive their schema name and app name using the schema derivation rule:
+  (--catalog defaults from setup-state.json; --lakebase-name must be passed
+   explicitly unless setup-state.json already has it)
+
+6. Derive their schema name and app name using the schema derivation rule:
      jsmith@company.com       -> schema: jsmith,    app: cs-agent-jsmith
      first.last@company.com   -> schema: first_last, app: cs-agent-first_last
    (strip domain, replace dots with underscores)
 
-6. Tell the participant:
+7. Tell the participant:
    "Your setup is complete. Your schema is <schema> and your app name is <app-name>."
 
 After onboarding completes, proceed to the Scenario Menu below.
