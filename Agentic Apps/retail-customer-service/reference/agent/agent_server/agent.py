@@ -46,6 +46,7 @@ CATALOG           = os.environ.get("WORKSHOP_CATALOG", "robert_mosley")
 SCHEMA            = os.environ.get("WORKSHOP_SCHEMA",  "shared")
 LLM_ENDPOINT      = os.environ.get("LLM_ENDPOINT",     "databricks-claude-sonnet-4-6")
 LAKEBASE_INSTANCE = os.environ.get("LAKEBASE_INSTANCE_NAME", "cs-agent-workshop-memory")
+LAKEBASE_SCHEMA   = os.environ.get("LAKEBASE_SCHEMA", None)  # per-user Postgres schema
 DATABRICKS_HOST   = os.environ.get("DATABRICKS_HOST", "")
 
 # ---------------------------------------------------------------------------
@@ -123,7 +124,8 @@ async def streaming(
     config: dict = {}
     try:
         checkpointer = await AsyncCheckpointSaver(
-            instance_name=LAKEBASE_INSTANCE
+            instance_name=LAKEBASE_INSTANCE,
+            schema=LAKEBASE_SCHEMA,  # None → 'public'; set to per-user schema in production
         ).__aenter__()
         config = {
             "configurable": {
@@ -131,7 +133,8 @@ async def streaming(
                 "user_id": user_id,
             }
         }
-        log.debug("Lakebase checkpointer active (thread_id=%s)", thread_id)
+        log.debug("Lakebase checkpointer active (instance=%s, schema=%s, thread_id=%s)",
+                  LAKEBASE_INSTANCE, LAKEBASE_SCHEMA, thread_id)
     except Exception as e:
         log.warning(
             "AsyncCheckpointSaver unavailable (%s) — running stateless. "

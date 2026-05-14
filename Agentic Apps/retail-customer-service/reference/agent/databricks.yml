@@ -4,13 +4,16 @@ bundle:
 variables:
   catalog:
     description: "Workshop catalog (set by instructor after running workspace_setup.py)"
-    default: "robert_mosley"
+    default: "cs_agent_workshop"
   schema:
-    description: "Workshop schema (set by instructor after running workspace_setup.py)"
+    description: "Your UC schema for UC Functions (set by user_setup.py)"
     default: "shared"
   lakebase_instance:
     description: "Shared Lakebase instance name (set by instructor after running workspace_setup.py)"
     default: "cs-agent-workshop-memory"
+  lakebase_schema:
+    description: "Per-user Postgres schema in Lakebase for conversation memory (set by user_setup.py, e.g. cs_agent_workshop_jsmith)"
+    default: ""
 
 resources:
   experiments:
@@ -38,6 +41,8 @@ resources:
             value: "databricks-claude-sonnet-4-6"
           - name: LAKEBASE_INSTANCE_NAME
             value_from: database
+          - name: LAKEBASE_SCHEMA
+            value: "${var.lakebase_schema}"
 
       resources:
         - name: experiment

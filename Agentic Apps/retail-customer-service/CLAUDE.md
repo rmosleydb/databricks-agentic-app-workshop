@@ -48,8 +48,11 @@ throughout the lab — they are live values, not placeholders.
                   — YOUR personal space. This is where you create UC Functions
                     and store your agent artifacts. No one else writes here.
   Lakebase:       {{LAKEBASE_INSTANCE}}
-                  — shared PostgreSQL instance for all participants, isolated
-                    per conversation by thread_id
+                  — shared PostgreSQL instance for all participants
+  Lakebase schema: {{LAKEBASE_SCHEMA}}
+                  — YOUR isolated Postgres schema within the instance.
+                    Each participant has their own schema so memory tables
+                    don't collide. Droppable per-user after the workshop.
   VS Index:       {{CATALOG}}.shared.product_docs_vs
   MLflow Exp:     /Users/{{USER}}/cs-agent-workshop
   Your app name:  cs-agent-{{USERNAME}}
