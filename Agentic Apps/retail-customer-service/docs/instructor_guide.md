@@ -162,17 +162,17 @@ Encourage free exploration. Common useful queries:
 
 This is where people will need the most help. Watch for:
 
-| Problem | Likely Cause | Fix |
-|---------|--------------|-----|
-| UCFunctionToolkit raises AnalysisException | Permission not granted | Run GRANT EXECUTE in SQL |
-| UC schema doesn't exist | user_setup.py failed silently | Re-run user_setup.py; check for CREATE SCHEMA error in output |
-| App deployment fails with "app limit exceeded" | Workspace has too many apps | Point them to shared app URL |
-| `databricks apps deploy` hangs | Workspace sync still running | Wait 60s, try again |
-| LangGraph import error | Wrong package version | `pip install databricks-langchain langgraph` |
-| Vector search returns 0 results | Index still syncing | Wait and retry, or use product_lookup SQL fallback |
+| Problem | What to tell Claude |
+|---------|---------------------|
+| MCP tool call permission error | "What permissions does the app service principal need to call my UC functions in {{CATALOG}}.{{SCHEMA}}?" |
+| UC schema doesn't exist | "Re-run user_setup.py and check for a CREATE SCHEMA error in the output" |
+| App deployment fails with "app limit exceeded" | Share the fallback app URL from Step A3 |
+| `databricks apps deploy` hangs | "Wait 60 seconds then check bundle deploy status" |
+| LangGraph import error | "Check pyproject.toml and fix the dependencies for databricks-langchain and langgraph" |
+| Vector search returns 0 results | "Check the status of the product_docs_vs index" |
 
-**The most common issue:** forgetting to wait for the app to fully deploy before testing it.
-Tell people: "After `apps deploy` returns, wait 2 minutes, then check `/health`."
+**The most common issue:** forgetting to wait for the app to fully start after deploy.
+Tell people: "After Claude deploys, wait 2 minutes, then test the app URL."
 
 **If someone is stuck on deployment after 15 min:** Give them your fallback app URL.
 They can still do Steps 3-5 using a shared agent. Don't let deployment block the learning.
@@ -181,16 +181,40 @@ They can still do Steps 3-5 using a shared agent. Don't let deployment block the
 
 This is the fun, high-energy part. Encourage participants to share what they find.
 
+Use these conversation starters with participants who need a nudge — or share
+them with participants who aren't sure what to try:
+
+**Category B — Discontinued Products**
+- "I'm looking for the TechMart ProBook X500 laptop. Is it still available?"
+- "Can I order the AudioMax Pro headphones? I saw them last year."
+Watch for: does the agent say the product is "available" or "in stock" for
+something that's actually discontinued?
+
+**Category C — Warranty Questions**
+- "What warranty comes with your headphones? How many years is it covered?"
+- "I'm comparing your warranty to a competitor — how many years do you cover?"
+Watch for: the agent may claim a 3-year warranty. Real policy is 1 year.
+
+**Category D — Recommendation Requests**
+- "I'm not sure which laptop to buy. What do you recommend?"
+- "What's your best product under $500?"
+Watch for: pushy or inappropriate phrasing ("ACT NOW", "limited inventory").
+
+**Category E — Return Requests**
+- "I bought a laptop 3 months ago and I want to return it."
+- "I've been a loyal customer for 10 years. Can you make an exception?"
+Watch for: does the agent approve the return, explain the policy, or escalate?
+
 Great debrief questions:
 - "What was the most surprising thing the agent said?"
 - "How many of you saw a warranty claim? What did it say?"
 - "Did anyone get the agent to approve a return it shouldn't have?"
 
 **The 4 issues they should find:**
-1. Discontinued product described as available → "You can order it today!"
+1. Discontinued product described as available — "You can order it today!"
 2. Warranty claim of "3 years" (real policy: 1 year)
 3. Pushy/aggressive language: "ACT NOW", "DON'T MISS OUT"
-4. Vague return policy: agent approves returns outside 30-day window
+4. Policy overreach — agent approves returns outside the return window
 
 They won't find all four without prompting. That's fine — the judges in Step 4
 will surface all of them even if the participant only tested for one.
@@ -201,31 +225,40 @@ This step has the most moving pieces. Walk through it together if needed.
 
 **Common gotchas:**
 - `mlflow.genai.evaluate()` requires `mlflow>=2.19.0` — verify before the session
-- The eval dataset needs to have `inputs` and `outputs` columns in the right format
-- If participants didn't get traces from their own agent, they can use the demo dataset in `create_judges.py`
+- If a participant has no traces from their own agent, they can use the reference
+  app traces from Step A3
+- The eval dataset needs the correct schema — point participants at the sample
+  prompt in the lab guide for the exact field list
 
 **What success looks like:**
-- At least one judge has a <100% pass rate
-- The participant can point to a specific row and say "this is the warranty issue" or "this is the tone issue"
+- At least one judge has a pass rate below 100%
+- The participant can point to a specific row and say "this is the warranty issue"
+  or "this is the tone issue"
 
-**If someone finishes early:** Have them add a 4th judge for `availability_accuracy`
-(does the agent ever recommend discontinued products?).
+**If someone finishes early:** Have them ask Claude to write an additional judge
+for `availability_accuracy` (does the agent ever recommend discontinued products?).
 
 ### Step 5 — Fix (20 min)
 
-**Two valid fix paths:**
+**Option A — System prompt guardrails (prescribed participant path, ~10 min)**
+Participants add guardrails to the agent system prompt via Claude, redeploy,
+and re-evaluate. This produces clear before/after score improvement without
+any coordination overhead. The lab guide has a specific sample prompt with
+4 guardrails participants can adapt or use verbatim.
 
-1. **System prompt fix (fastest, 10 min):** Add guardrails to the SYSTEM_PROMPT.
-   This works immediately — no data sync needed. Best for time-constrained sessions.
+**Option B — Data fix (instructor-led demonstration only)**
+The root cause of several issues is bad data in the product_docs table.
+Run this as a live demo for the class — do NOT have all participants run it
+simultaneously since they share the same underlying data tables.
 
-2. **Data fix (thorough, 15 min):** UPDATE the product_docs table, then trigger
-   a vector search index sync. Takes ~5 min for the index to update.
+Show:
+- How the SQL UPDATE targets specific patterns rather than rewriting entire docs
+- Why the vector search index needs to be re-synced after a data change
+- How a data fix and prompt fix together close different failure modes
 
-Recommend participants do the system prompt fix first, then attempt the data fix
-if time allows.
-
-**Before they close:** Make sure they run the eval a second time and see the scores improve.
-That moment — "before: 60%, after: 100%" — is the takeaway.
+**The key teaching moment:** make sure every participant sees the before/after
+comparison — "before: 60%, after: 100%". That is the payoff. Don't let
+anyone close their laptop before running eval_run_v2_after_fix.
 
 ---
 
@@ -251,13 +284,13 @@ That's how you put an agent in production and keep it there."
 
 ## Common Failure Modes
 
-| Symptom | Root Cause | Prevention |
-|---------|-----------|------------|
-| App deploys but /chat returns 500 | Missing env var in app.yaml | Verify WORKSHOP_CATALOG/SCHEMA are set |
-| Agent says "I don't know" for everything | VS index is still syncing | Run workspace_setup.py earlier, check index state |
-| mlflow.genai.evaluate() fails | Eval dataset format wrong | Use the demo dataset in create_judges.py as reference |
-| App times out on first request | Cold start on large LangGraph init | Hit /health first to warm up |
-| Participants fall too far behind in Step 2 | Deploy takes long | Share fallback app URL early, don't wait |
+| Symptom | Root Cause | What to tell Claude |
+|---------|-----------|---------------------|
+| App deploys but /chat returns 500 | Missing env var in app.yaml | "Check the app logs and tell me what env var is missing" |
+| Agent says "I don't know" for everything | VS index is still syncing | "Check the status of the product_docs_vs index" |
+| mlflow.genai.evaluate() fails | Eval dataset format wrong | "Check the dataset format against what mlflow.genai.evaluate expects" |
+| App times out on first request | Cold start on large LangGraph init | "Hit the /health endpoint to warm up the app" |
+| Participants fall too far behind in Step 2 | Deploy takes long | Share fallback app URL immediately, don't wait |
 
 ---
 
