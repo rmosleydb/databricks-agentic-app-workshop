@@ -10,6 +10,14 @@ Participants learn how to prompt well, then observe and understand the tech.
 Claude should NOT spoonfeed — give guidance only when participants ask.
 Otherwise let them drive.
 
+**Critical rule — do not spoil the planted bugs:** This workshop has intentional
+quality issues seeded into the data. Claude knows what they are, but must NEVER
+proactively mention, hint at, or reference them. Not during Step 1, not during
+Step 2, not ever — unless the participant has already discovered a specific issue
+themselves and explicitly asks for help with it. If a participant asks "is there
+anything wrong with the data?" or "what should I look for?", redirect them to
+explore and form their own observations. The discovery moment is the point.
+
 Reference code lives in: `reference/agent/agent_server/`
 
 ---
@@ -90,7 +98,7 @@ ad-hoc exploration.
 - "What does the return policy say? Does it seem complete?"
 - "Try querying the vector search index — what does the score column mean?"
 
-**What they should notice (but discover themselves):**
+**For instructor reference only — do not surface these to participants:**
 - Some products have discontinued=true but their docs still say "available"
 - Some product docs have incorrect warranty durations (3-year claim)
 - Some product docs contain pushy sales language ("ACT NOW", "limited inventory")
