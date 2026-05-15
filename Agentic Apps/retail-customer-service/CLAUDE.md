@@ -76,8 +76,9 @@ Navigate to Unity Catalog in the Databricks UI (left nav > Catalog). Browse
 to the {{CATALOG}}.shared schema. Click on each table to explore it — use
 the Sample Data tab to see rows without running any code.
 
-Tables to explore: products, product_docs, orders, policies,
-and the product_docs_vs vector search index.
+Tables to explore: products, product_docs, orders, policies, and the
+product_docs_vs vector search index. Note: customer info (email, shipping
+address) is embedded in the orders table — there is no separate customers table.
 
 If you want to run SQL to dig deeper, use the SQL Editor (left nav > SQL
 Editor). Do not use a notebook for this step — the SQL Editor is faster for
@@ -94,6 +95,14 @@ ad-hoc exploration.
 - Some product docs have incorrect warranty durations (3-year claim)
 - Some product docs contain pushy sales language ("ACT NOW", "limited inventory")
 - The policies table defines the real rules they need to enforce
+
+**Sample prompts for Claude:**
+- "Help me understand what's in the shared schema — what tables are there
+  and what do they contain?"
+- "Some products have discontinued = true. Help me write a query to see
+  their product docs side by side."
+- "The return policy seems vague about exceptions. What questions might a
+  customer ask that this doesn't clearly answer?"
 
 **Where to look in Databricks:**
 Left nav > Catalog > {{CATALOG}} > shared > [table name] > Sample Data tab.
@@ -113,7 +122,7 @@ code, then deploy.
 
 **What they're building**
 Four Unity Catalog Functions that become the agent's tools — semantic search,
-product lookup, order status, and return policy. These live in the
+product lookup, order status, and return/warranty policy. These live in the
 participant's personal schema so they don't collide with others.
 
 **What to tell Claude**
@@ -122,27 +131,24 @@ participant's personal schema so they don't collide with others.
 - What tables exist: products, product_docs, orders, policies
 - What each function should do (in plain language — Claude writes the SQL)
   - product_lookup: semantic search over product docs using the vector search index
-  - get_product_details: structured lookup for a specific product by name
-  - get_order_status: look up an order and include customer info
-  - get_return_policy: fetch the return policy from the policies table
+  - get_product_details: structured lookup for a specific product by name, include discontinued status
+  - get_order_status: look up an order (customer email and shipping address are columns in orders)
+  - get_return_policy: fetch the return and warranty policies from the policies table
 
 **Sample prompt**
   Create 4 UC Functions in {{CATALOG}}.{{SCHEMA}} as tools for a customer
-  service agent. The data is in {{CATALOG}}.shared and has these tables:
-  products, product_docs, orders, policies. There is also a
-  vector search index at {{CATALOG}}.shared.product_docs_vs.
+  service agent. The shared data is in {{CATALOG}}.shared and has these tables:
+  products, product_docs, orders, policies. There's also a vector search
+  index at {{CATALOG}}.shared.product_docs_vs.
 
-  I need these 4 functions:
-  1. product_lookup(query STRING) — semantic search over product_docs using
-     the vector search index, returns top 5 results with relevance scores
-  2. get_product_details(product_name STRING) — structured lookup on the
-     products table, returns price, category, discontinued status
-  3. get_order_status(order_id STRING) — looks up an order from the orders
-     table (which includes customer_email and shipping_address), returns
-     order status and customer info
-  4. get_return_policy() — fetches the return policy from the policies table
+  I need:
+  1. product_lookup — semantic search over product docs using the VS index
+  2. get_product_details — look up a product by name, include discontinued status
+  3. get_order_status — look up an order from the orders table (customer email
+     and shipping address are columns in orders)
+  4. get_return_policy — fetch the return and warranty policies
 
-  Create all 4 functions in {{CATALOG}}.{{SCHEMA}}.
+  Create all 4 in {{CATALOG}}.{{SCHEMA}}.
 
 **What to look at**
 After Claude creates the functions, go to:
@@ -159,12 +165,15 @@ Lakebase for conversation memory, and MLflow for tracing. The agent is
 scaffolded from the Databricks agent-langgraph-advanced app template.
 
 **What to tell Claude**
-- Use the databricks/app-templates agent-langgraph-advanced template as the starting point
-- Use Lakebase for conversation memory (AsyncCheckpointSaver), isolate by thread_id
-- Use the 4 UC Functions just created as MCP tools via DatabricksMCPServer
+- Use the Databricks app-templates repo (https://github.com/databricks/app-templates)
+  and choose the langgraph-advanced agent template
+- Use the latest OpenAI GPT model available in Databricks
+- Use my 4 UC Functions as tools via DatabricksMCPServer
 - The UC Functions are in {{CATALOG}}.{{SCHEMA}}
 - The agent is a customer service assistant for TechMart (electronics retailer)
-- It should be deployed as a Databricks App
+- Keep the system prompt minimal for now — no guardrails. You want to find
+  problems naturally in Step 3.
+- It should be deployable as a Databricks App
 
 **Architecture Claude will wire up:**
 - UC Functions become MCP tools via DatabricksMCPServer / DatabricksMultiServerMCPClient
@@ -177,23 +186,23 @@ scaffolded from the Databricks agent-langgraph-advanced app template.
 - databricks.yml declares the bundle: app, experiment, postgres (Lakebase) resource
 
 **Sample prompt**
-  Build me a customer service agent using the Databricks agent-langgraph-advanced app
-  template. The agent is for TechMart, an electronics retailer.
+  Build me a customer service agent for TechMart, an electronics retailer.
+  Use the Databricks app-templates repo (https://github.com/databricks/app-templates)
+  and choose the langgraph-advanced agent template.
 
-  Use Lakebase for conversation memory (AsyncCheckpointSaver), isolating
-  conversations by thread_id.
-
-  Use my 4 UC Functions in {{CATALOG}}.{{SCHEMA}} as tools via
-  DatabricksMCPServer. The functions are: product_lookup, get_product_details,
-  get_order_status, get_return_policy.
-
-  Wire up MLflow tracing via mlflow.genai.start_server(). The agent should
-  be deployable as a Databricks App.
+  Requirements:
+  - Use the latest OpenAI GPT model available in Databricks
+  - Use my 4 UC Functions in {{CATALOG}}.{{SCHEMA}} as tools via DatabricksMCPServer
+  - Use Lakebase for conversation memory, isolating conversations by thread_id
+  - Include MLflow tracing, experiment at /Users/{{USER}}/cs-agent-workshop
+  - Keep the system prompt minimal for now — no guardrails. I want to find
+    problems naturally in Step 3.
+  - The app should be deployable as a Databricks App
 
 **What to look at**
 Claude will generate the agent code files. Review the structure — especially
 the system prompt (where agent behavior is defined) and the databricks.yml
-bundle config. You will customize the system prompt in Step 5.
+bundle config. You will improve the system prompt in Step 5.
 
 ---
 
@@ -203,31 +212,26 @@ bundle config. You will customize the system prompt in Step 5.
 A running Databricks App accessible via a public URL, deployed from the
 agent code using Databricks Asset Bundles.
 
-**What to tell Claude**
-- Deploy the app with the name cs-agent-{{USERNAME}} (user-specific to avoid
-  collisions with other workshop participants)
-- Claude will run databricks bundle validate, bundle deploy, and bundle run
-
 **Sample prompt**
-  Deploy my Databricks App. Name it cs-agent-{{USERNAME}} so it doesn't
-  conflict with other participants. Validate the bundle first, then deploy,
-  then start the app. Report back the app URL when it's running.
+  Deploy my Databricks App as cs-agent-{{USERNAME}} so it doesn't conflict
+  with other participants. Validate the bundle, deploy, start the app, and
+  give me the URL when it's running.
 
 **What to look at**
-Left nav > Compute > Apps (or left nav > Apps depending on your workspace).
-Find cs-agent-{{USERNAME}} in the list. Click it to see:
-- Status (should be Running)
-- Logs tab — useful if the app fails to start
-- The app URL you will use in Step 3
+Left nav > Apps. Find cs-agent-{{USERNAME}}. Check that status is Running
+and note the app URL — you will use it in Step 3.
 
 **Common sticking points:**
-- "Permissions error on the MCP call" — the app service principal needs
-  EXECUTE on the UC functions in {{CATALOG}}.{{SCHEMA}}
-- "Bundle deploy failed" — ask Claude: "Run databricks bundle validate and
-  tell me what it says"
-- "App won't start" — ask Claude to check the Logs tab output
-- "AsyncCheckpointSaver error" — expected if Lakebase isn't configured yet;
-  the code should fall back to stateless gracefully
+
+  Problem | What to tell Claude
+  --------|--------------------
+  Permissions error on MCP tool call | "Grant execute on my UC functions in
+    {{CATALOG}}.{{SCHEMA}} to the app service principal"
+  Bundle deploy failed | "Run bundle validate and tell me what the errors are"
+  App won't start | "Check the app logs in the Logs tab and tell me what
+    the error is"
+  AsyncCheckpointSaver warning | Expected if Lakebase isn't configured —
+    the agent falls back to stateless gracefully
 
 ---
 
@@ -235,33 +239,50 @@ Find cs-agent-{{USERNAME}} in the list. Click it to see:
 
 **What they're building**
 An understanding of where the agent fails — by chatting with it directly.
-These failures become the eval dataset in Step 4.
+These failures become the eval dataset in Step 4. Write down exact quotes —
+you'll use them to build judges.
 
-**Four categories of issues planted in the data:**
+Open the app URL from Step 2c and start chatting.
 
-  A. Discontinued products — agent says product is available when it is not.
-     How to surface: ask about a product you saw had discontinued=true.
+**Category A — Normal (should work fine)**
+- "Can you help me find a laptop for college use?"
+- "What are your shipping options?"
 
-  B. Wrong warranty duration — agent claims 3-year warranty (from bad doc).
-     How to surface: ask "What warranty do your headphones come with?"
+**Category B — Discontinued Products**
+- "I'm looking for the TechMart ProBook X500 laptop. Is it still available?"
+- "Can I order the AudioMax Pro headphones? I saw them last year."
 
-  C. Pushy sales tone — agent uses "ACT NOW", "limited inventory" phrases.
-     How to surface: ask for a product recommendation.
+What to watch for: Does the agent say the product is "available" or "in
+stock"? Check whether it's actually discontinued in the data from Step 1.
 
-  D. Policy overreach — agent approves returns outside 30-day window.
-     How to surface: "I bought a laptop 3 months ago, can I return it?"
+**Category C — Warranty Questions**
+- "What warranty comes with your headphones? How many years is it covered?"
+- "I'm comparing your warranty to a competitor — how many years do you cover?"
 
-**Guiding questions:**
-- "Did the agent say anything that surprised you? What was it?"
-- "Is that response factually correct based on what you saw in the data?"
-- "Write down what you found — you'll need it to build your eval dataset."
+What to watch for: What warranty duration does the agent claim? How does
+that compare to the official policy you saw in Step 1?
 
-**Do not tell them which products are discontinued or what the warranty
-claim is.** Let them discover it through conversation.
+**Category D — Recommendation Requests**
+- "I'm not sure which laptop to buy. What do you recommend?"
+- "What's your best product under $500?"
+
+What to watch for: Does the agent use any phrases that feel pushy or
+inappropriate for a support context? Note the exact words.
+
+**Category E — Return Requests**
+- "I bought a laptop 3 months ago and I want to return it."
+- "I've been a loyal customer for 10 years. Can you make an exception on
+  my return?"
+
+What to watch for: Does the agent approve the return, explain the policy,
+or offer to escalate? Which is the correct behavior?
+
+**Do not tell participants which products are discontinued or what the
+warranty claim is.** Let them discover it through conversation.
 
 **Where to look in Databricks:**
-Left nav > Apps (or Compute > Apps) > cs-agent-{{USERNAME}} > click the app URL to open the chat
-interface. Each conversation is automatically traced — go to
+Left nav > Apps > cs-agent-{{USERNAME}} > click the app URL to open the
+chat interface. Each conversation is automatically traced — go to
 Experiments > /Users/{{USER}}/cs-agent-workshop to see traces accumulating
 as you chat.
 
@@ -282,26 +303,44 @@ describe the goal and review the results in the UI.
 #### Step 4a — Generate Traces
 
 **What they're building**
-A set of scripted conversations run against the deployed app to populate
-the MLflow experiment with traces representing realistic usage (including
-the failure scenarios from Step 3).
-
-**What to tell Claude**
-- The MLflow experiment path: /Users/{{USER}}/cs-agent-workshop
-- The app URL: the URL from cs-agent-{{USERNAME}} (from Step 2c)
-- That you want scripted conversations covering the 4 issue types from Step 3
+A set of scripted conversations covering all 4 issue categories, run against
+the deployed app to populate the MLflow experiment with realistic traces.
 
 **Sample prompt**
-  Run scripted test conversations against my deployed app at [APP_URL].
-  Log the traces to the MLflow experiment at /Users/{{USER}}/cs-agent-workshop.
-  Include conversations that exercise: discontinued product recommendations,
-  warranty duration questions, product recommendation requests, and late
-  return requests. Generate at least 20 conversations.
+  I want to generate a baseline set of conversation traces against my deployed
+  agent so I can evaluate whether it handles realistic customer scenarios well.
+  Use MLflow's ConversationSimulator (mlflow.genai.simulators.ConversationSimulator)
+  to drive multi-turn dialogues. Log all traces to my MLflow experiment at
+  /Users/{{USER}}/cs-agent-workshop.
+
+  Generate 20 conversations, 5 each, covering four customer-experience categories:
+
+  1. Product availability questions — customers asking about specific products,
+     browsing recommendations, asking what's currently for sale, particularly
+     concerned with how it handles discontinued products
+  2. Product specifications and policies — customers asking warranty length,
+     support terms, what's covered
+  3. Recommendation requests across price/use-case — customers asking "what
+     should I buy" for various budgets and situations, checking for tone,
+     pushiness, and user friendliness
+  4. Returns and post-purchase support — customers asking to return or exchange
+     items at various points after purchase
+
+  For each test case, define:
+  - goal — what the simulated customer wants from the conversation
+  - persona — who they are and what they care about
+  - simulation_guidelines — natural phrasing, when to wrap up (cap at 4 turns)
+  - expectations.expected_resolution — what a correct, well-behaved customer
+    service interaction would look like here
+
+  Use any of the latest GPT or Anthropic models as the simulator's user_model.
+  Tag the run baseline_simulator_v1 so the next step can find the traces.
+  Each conversation should use a distinct thread_id so AsyncCheckpointSaver
+  keeps multi-turn history per case.
 
 **What to look at**
-Left nav > Experiments > find /Users/{{USER}}/cs-agent-workshop.
-Click into the experiment to see the traces. Click individual traces to
-see the full conversation, tool calls, and latency breakdown.
+Left nav > Experiments > /Users/{{USER}}/cs-agent-workshop. Click individual
+traces to see the full conversation, tool calls, and latency breakdown.
 
 ---
 
@@ -312,29 +351,31 @@ A focused dataset of input/output pairs that capture the quality issues —
 the "ground truth" for what a correct response looks like. Claude searches
 the traces and builds this dataset.
 
-**What to tell Claude**
-- What quality issues you found in Step 3 (be specific — describe the bad
-  behavior you observed)
-- That you want to build an eval dataset from traces in
-  /Users/{{USER}}/cs-agent-workshop
-- Whether to save it as a UC table in {{CATALOG}}.{{SCHEMA}} or as an
-  MLflow artifact
-
 **Sample prompt**
   Search the traces in my MLflow experiment /Users/{{USER}}/cs-agent-workshop
   and build an eval dataset capturing these quality issues I found in Step 3:
-  [describe what you found — e.g. "agent recommended a discontinued product",
-  "agent claimed 3-year warranty", "agent used pushy sales language",
-  "agent approved a return for a purchase made 3 months ago"].
+  [describe what you found — e.g. "agent recommended a discontinued product
+  and said it was in stock", "agent claimed 3-year warranty", "agent used
+  phrases like ACT NOW", "agent approved a return for a purchase made 3
+  months ago"].
 
-  For each example, include: the input question, the agent's actual output,
-  and a ground_truth field describing what a correct response would say.
-  Save the dataset to {{CATALOG}}.{{SCHEMA}}.eval_dataset.
+  Each row should have:
+  - case_id
+  - category — one of: product_availability, product_specs_policies,
+    recommendations, returns_support
+  - goal, persona, guidelines
+  - expected_resolution — the customer service standard for this scenario
+  - first_user_message — what the simulated customer opened with
+  - final_agent_response — what the agent actually said by the end
+  - full_transcript — the whole conversation as JSON
+  - trace_id — for drilling back into the MLflow trace
+
+  Save the dataset to {{CATALOG}}.{{SCHEMA}}.eval_dataset and register it
+  as an MLflow eval dataset linked to the experiment.
 
 **What to look at**
-Catalog > {{CATALOG}} > {{SCHEMA}} — look for the eval_dataset table.
-Click it and use the Sample Data tab to verify the dataset looks right.
-You can also see it in Experiments if Claude logged it as an MLflow artifact.
+Catalog > {{CATALOG}} > {{SCHEMA}} > eval_dataset. Use the Sample Data tab
+to verify the examples look right.
 
 ---
 
@@ -345,39 +386,37 @@ Guidelines scorers — LLM-as-judge evaluators that score each example
 pass/fail based on a natural-language rule. One judge per issue type.
 Claude writes the judge language based on participant description.
 
-**What to tell Claude**
-Describe each quality problem in plain language. Claude will translate
-your description into precise Guidelines scorer language.
-
 **Sample prompt**
-  Write Guidelines scorers for these 3 quality issues in my TechMart
-  customer service agent:
+  Write Guidelines scorers for the quality issues I found in my TechMart agent:
 
-  1. Factual accuracy on discontinued products — the agent should never
-     recommend a product that is marked discontinued=true in the products table.
-     If a product is discontinued, it should say so and suggest alternatives.
+  1. Discontinued product accuracy — agent should never recommend a product
+     that is discontinued. If discontinued, it should say so and suggest
+     alternatives.
 
-  2. Warranty duration accuracy — the agent should only state warranty
-     durations found in the retrieved product docs. Our standard is 1 year.
-     If the docs are unclear, the agent should say it is unsure.
+  2. Warranty duration accuracy — agent should only state warranty durations
+     from retrieved product docs. Our standard is 1 year. If uncertain, the
+     agent should operate off of the standard.
 
-  3. Tone quality — the agent should be helpful and informative but never
-     use high-pressure sales language like "ACT NOW", "limited time",
-     or "limited inventory".
+  3. Tone quality — agent should be professional and helpful, never use
+     high-pressure language like "ACT NOW", "limited time", or "limited
+     inventory".
 
-  4. Policy compliance — the agent must follow the 30-day return policy.
-     It should never approve a return for a purchase made more than 30 days
-     ago without escalating to a human agent.
+  4. Policy compliance — agent must follow the return policy below.
+     "Customers may return any product for any reason within 1 year of
+     purchase for a full refund or exchange. No receipt required. Items
+     must be in original or gently used condition. Contact support to
+     initiate a return."
+     Fail if the agent violates this in any way.
 
 **A good judge is specific enough that a model can reliably decide pass/fail.**
-Bad: "The response is good."
-Good: "The response only states warranty durations found in retrieved docs.
-       Our standard is 1 year. If uncertain, the agent says so."
+Too vague: "The response is good."
+Better: "The response only states warranty durations found in retrieved docs.
+Our standard is 1 year. If uncertain, the agent operates off of the standard."
 
 **What to look at**
-Claude will show you the scorer definitions. Review the judge language —
-if it feels vague, ask Claude to make it more specific. The judges run
-as part of Step 4d; you see scores there.
+Review the scorer definitions Claude shows you. If a judge feels vague, ask
+Claude to make it more specific. Judges that pass everything are not strict
+enough — you need a failing baseline to improve from.
 
 ---
 
@@ -388,15 +427,10 @@ An MLflow evaluation run that scores every example in the dataset against
 every judge, producing a pass-rate per judge and per-example reasoning.
 This is the baseline to beat in Step 5.
 
-**What to tell Claude**
-- Run the evaluation using the dataset built in 4b and the judges from 4c
-- Use the MLflow experiment /Users/{{USER}}/cs-agent-workshop
-- Name the run eval_run_v1_baseline so you can compare it to the post-fix run
-
 **Sample prompt**
-  Run an evaluation using the eval dataset we built in {{CATALOG}}.{{SCHEMA}}.eval_dataset
-  and the judges we defined. Log results to the MLflow experiment at
-  /Users/{{USER}}/cs-agent-workshop, name the run eval_run_v1_baseline.
+  Run an evaluation using the eval dataset in {{CATALOG}}.{{SCHEMA}}.eval_dataset
+  and the judges we defined. Log to my MLflow experiment
+  /Users/{{USER}}/cs-agent-workshop. Name the run eval_run_v1_baseline.
   Use mlflow.genai.evaluate().
 
 **What to look at**
@@ -404,72 +438,66 @@ Left nav > Experiments > /Users/{{USER}}/cs-agent-workshop > find the run
 eval_run_v1_baseline. Open it to see:
 - Per-judge pass rates in the Metrics tab
 - Per-example scores and judge reasoning in the Artifacts tab
-- The goal: at least one judge should have a failing score. If everything
-  passes, the judges are not strict enough — ask Claude to tighten the language.
+- The goal: at least one judge should be failing. If everything passes,
+  the judges are not strict enough — ask Claude to tighten the language.
 
 ---
 
 ### Step 5 — Fix and Verify
 
 **What they're building**
-A targeted improvement — either a system prompt change or a data fix —
-that moves the failing eval scores upward. Claude makes the fix and
-redeploys; participants run the eval again and compare.
+A targeted improvement that moves the failing eval scores upward. Claude
+makes the fix and redeploys; participants run the eval again and compare.
 
-**Two fix strategies (participants choose, Claude executes):**
+**Option A — System Prompt Guardrails (your path, ~10 min)**
+Add explicit rules to the agent system prompt so it knows what correct
+behavior looks like. Claude edits the code and redeploys — no data sync
+needed.
 
-  Fix A — System prompt guardrails (faster, higher leverage for most issues)
-  Add explicit rules to the agent system prompt: check discontinued flag
-  before recommending, never claim warranty > 1 year unless docs say so,
-  no high-pressure language, explain policy before responding to return requests.
+**Sample prompt**
+  Fix the agent by adding guardrails to the system prompt that address
+  the issues we found:
+  - Before recommending any product, always check discontinued status and
+    never recommend discontinued products
+  - For any warranty or return question, always call get_return_policy()
+    and ground your answer in its result. Treat product descriptions as
+    informational only — they may contain marketing language, but the
+    policies table is the source of truth for warranty terms and returns.
+  - Use professional, empathetic language — never use phrases like "ACT NOW"
+    or "limited inventory"
+  - For return requests, always look up the return policy first; explain
+    the policy and say you can't make exceptions.
 
-  Fix B — Data fix (more thorough, fixes the root cause)
-  Update product_docs in {{CATALOG}}.shared to remove incorrect warranty claims,
-  remove pushy language, update discontinued product docs to say unavailable.
-  After the SQL fix, trigger a vector search index sync on
-  {{CATALOG}}.shared.product_docs_vs.
+  After making the changes, redeploy the app as cs-agent-{{USERNAME}}.
 
-**Guiding questions to help participants pick their approach:**
-- "Which issues came from bad data vs. the agent not knowing the rules?"
-- "If you fix the data but not the prompt, what could still go wrong?"
-- "If you fix the prompt but not the data, what might still slip through?"
+**Option B — Data Fix (instructor demonstration)**
+The root cause of several issues is bad data in the product_docs table —
+incorrect warranty claims, pushy language, and misleading availability text
+for discontinued products. A proper production fix would address the data
+at the source, not just work around it in the prompt.
 
-**What to tell Claude — Fix A (prompt)**
+Your instructor will demonstrate this live. Watch for:
+- How the SQL UPDATE targets specific patterns rather than rewriting entire docs
+- Why the vector search index needs to be re-synced after a data change
+- How a data fix and prompt fix together close different failure modes
 
-  Sample prompt:
-    Fix the [issue type] problem by adding guardrails to the agent system
-    prompt. Specifically: [describe the rule in plain language, e.g.
-    "before recommending any product, check that discontinued=false" or
-    "never state a warranty longer than 1 year unless the product doc
-    explicitly says otherwise"]. After making the change, redeploy the app
-    as cs-agent-{{USERNAME}}.
+This is an instructor demonstration — not a step you run yourself — because
+all participants share the same underlying data tables.
 
-**What to tell Claude — Fix B (data)**
+**After Option A (and after the instructor demo if time allows):**
 
-  Sample prompt:
-    Fix the [issue type] problem by updating the product_docs table in
-    {{CATALOG}}.shared. Specifically: [describe what to change, e.g.
-    "remove any warranty claims longer than 1 year" or "remove phrases
-    like ACT NOW and limited inventory from all product docs"].
-    After updating the data, trigger a sync on the vector search index
-    {{CATALOG}}.shared.product_docs_vs, then redeploy cs-agent-{{USERNAME}}.
-
-**After the fix:**
-Tell Claude to re-run the evaluation with run name eval_run_v2_after_fix.
-Claude will run mlflow.genai.evaluate() and log results to the same experiment.
-
-  Sample prompt:
-    Re-run the evaluation using the same dataset and judges, but name this
-    run eval_run_v2_after_fix. Log to /Users/{{USER}}/cs-agent-workshop.
+**Sample prompt**
+  Re-run the evaluation using the same dataset and judges. Name this run
+  eval_run_v2_after_fix. Log to /Users/{{USER}}/cs-agent-workshop.
 
 **What to look at**
-Left nav > Experiments > /Users/{{USER}}/cs-agent-workshop. You should now
-see two runs: eval_run_v1_baseline and eval_run_v2_after_fix. Click the
-checkbox on both and select Compare to see the metric delta side-by-side.
+Left nav > Experiments > /Users/{{USER}}/cs-agent-workshop. Select both runs
+(eval_run_v1_baseline and eval_run_v2_after_fix) and click Compare. Pass
+rates on the affected judges should be higher.
 
-Success = pass rates on the affected judges go up. If they don't:
-"Look at the judge reasoning for the still-failing examples. What is it
-objecting to? Is your fix addressing that specifically?"
+If scores didn't improve: ask Claude to look at the judge reasoning for
+still-failing examples. "The warranty judge is still failing — the reasoning
+says the agent cited 3 years. What could explain that after the prompt change?"
 
 ---
 
@@ -544,5 +572,6 @@ Step 4 is conceptually rich. Spend time on "what makes a good judge?"
 The judge language is the most important artifact — vague judges produce
 useless scores.
 
-Step 5 is satisfying — seeing scores improve is the payoff. Encourage
-participants to try both fix strategies if time allows.
+Step 5 is satisfying — seeing scores improve is the payoff. Make sure
+every participant gets to see their before/after score comparison before
+they close their laptops.
