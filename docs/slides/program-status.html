@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Program Status Update — Agentic Apps Workshop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0B2026;
+    --accent: #FF3621;
+    --surface: #112830;
+    --surface-highlight: #0F3040;
+    --white: #FFFFFF;
+    --muted: #8AABAF;
+    --amber: #F5A623;
+    --red-status: #E53935;
+    --green-status: #43A047;
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    font-family: 'Inter', sans-serif;
+  }
+
+  #viewport {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  #canvas-wrapper {
+    position: relative;
+    transform-origin: top left;
+  }
+
+  .slide-canvas {
+    width: 1920px;
+    height: 1080px;
+    background: var(--bg);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .slide {
+    display: none;
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    padding: 80px 100px;
+  }
+
+  .slide.active {
+    display: block;
+  }
+
+  /* Slide counter */
+  #slide-counter {
+    position: fixed;
+    bottom: 24px;
+    right: 32px;
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    z-index: 100;
+    pointer-events: none;
+  }
+
+  /* Shared text styles */
+  .section-label {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 20px;
+  }
+
+  .slide-title {
+    font-size: 48px;
+    font-weight: 700;
+    color: var(--white);
+    line-height: 1.15;
+    margin-bottom: 48px;
+  }
+
+  /* ============================================
+     SLIDE 1 — TITLE
+  ============================================ */
+  #slide-1 {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 80px 140px;
+  }
+
+  .s1-top-label {
+    position: absolute;
+    top: 60px;
+    left: 100px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .s1-title {
+    font-size: 88px;
+    font-weight: 700;
+    color: var(--white);
+    line-height: 1.05;
+    margin-bottom: 28px;
+    letter-spacing: -0.02em;
+  }
+
+  .s1-subtitle {
+    font-size: 32px;
+    font-weight: 500;
+    color: var(--accent);
+    margin-bottom: 24px;
+    letter-spacing: 0.01em;
+  }
+
+  .s1-author {
+    font-size: 20px;
+    font-weight: 400;
+    color: var(--muted);
+    margin-bottom: 80px;
+  }
+
+  .s1-rule {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--accent);
+  }
+
+  /* ============================================
+     SLIDE 2 — OBJECTIVES
+  ============================================ */
+  .obj-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 24px;
+    flex: 1;
+    margin-bottom: 28px;
+  }
+
+  .obj-card {
+    background: var(--surface);
+    border-radius: 6px;
+    padding: 36px 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .obj-card-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.01em;
+  }
+
+  .obj-card-body {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--white);
+    line-height: 1.65;
+  }
+
+  .obj-caption {
+    font-size: 13px;
+    font-style: italic;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  #slide-2 {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ============================================
+     SLIDE 3 — LANDSCAPE TABLE
+  ============================================ */
+  #slide-3 {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .landscape-table {
+    width: 100%;
+    border-collapse: collapse;
+    flex: 1;
+  }
+
+  .landscape-table th,
+  .landscape-table td {
+    padding: 16px 20px;
+    text-align: left;
+    font-size: 13px;
+    line-height: 1.55;
+    vertical-align: top;
+  }
+
+  .landscape-table thead tr {
+    background: var(--surface);
+  }
+
+  .landscape-table thead th {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--white);
+    border-bottom: 2px solid var(--bg);
+  }
+
+  .landscape-table thead th.ours {
+    background: var(--surface-highlight);
+    border-top: 3px solid var(--accent);
+    color: var(--white);
+  }
+
+  .landscape-table thead th.dim-col {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .landscape-table tbody tr:nth-child(odd) {
+    background: #0d2530;
+  }
+
+  .landscape-table tbody tr:nth-child(even) {
+    background: var(--surface);
+  }
+
+  .landscape-table tbody td {
+    color: var(--white);
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+
+  .landscape-table tbody td.dim-col {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .landscape-table tbody td.ours {
+    background: rgba(15, 48, 64, 0.5);
+  }
+
+  .landscape-table tbody tr:nth-child(odd) td.ours {
+    background: rgba(15, 48, 64, 0.7);
+  }
+
+  /* ============================================
+     SLIDE 4 — POSITIONING
+  ============================================ */
+  #slide-4 {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .flow-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 32px;
+  }
+
+  .flow-box {
+    background: var(--surface);
+    border-radius: 6px;
+    padding: 36px 40px;
+  }
+
+  .flow-box-left {
+    border-left: 4px solid var(--accent);
+    min-width: 420px;
+    max-width: 420px;
+    align-self: center;
+  }
+
+  .flow-box-right {
+    border-left: 4px solid var(--accent);
+    flex: 1;
+  }
+
+  .flow-box-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 12px;
+  }
+
+  .flow-box-body {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--white);
+    line-height: 1.65;
+  }
+
+  .flow-arrows {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 80px;
+    padding: 0 32px;
+    position: relative;
+    align-self: stretch;
+  }
+
+  .flow-arrow-branch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    flex: 1;
+    gap: 24px;
+  }
+
+  .flow-right-boxes {
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+    flex: 1;
+    justify-content: center;
+  }
+
+  .arrow-h {
+    display: flex;
+    align-items: center;
+    gap: 0;
+  }
+
+  .arrow-line {
+    height: 2px;
+    background: var(--muted);
+    width: 48px;
+  }
+
+  .arrow-head {
+    width: 0;
+    height: 0;
+    border-top: 7px solid transparent;
+    border-bottom: 7px solid transparent;
+    border-left: 10px solid var(--muted);
+  }
+
+  /* Fork arrow SVG */
+  .fork-svg {
+    flex-shrink: 0;
+    padding: 0 16px;
+  }
+
+  .flow-caption {
+    font-size: 13px;
+    font-style: italic;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  /* ============================================
+     SLIDE 5 — CHALLENGES
+  ============================================ */
+  #slide-5 {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .challenge-row {
+    display: flex;
+    gap: 28px;
+    flex: 1;
+  }
+
+  .challenge-card {
+    background: var(--surface);
+    border-radius: 6px;
+    padding: 44px 40px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .challenge-num {
+    font-size: 56px;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .challenge-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--white);
+  }
+
+  .challenge-body {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+
+  /* ============================================
+     SLIDE 6 — STATUS
+  ============================================ */
+  #slide-6 {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .status-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    flex: 1;
+    justify-content: center;
+  }
+
+  .status-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    padding: 26px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .status-row:first-child {
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 4px;
+  }
+
+  .status-dot.amber { background: var(--amber); }
+  .status-dot.red { background: var(--red-status); }
+
+  .status-item-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--white);
+    min-width: 240px;
+    flex-shrink: 0;
+  }
+
+  .status-item-desc {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  /* ============================================
+     SLIDE 7 — NEXT STEPS
+  ============================================ */
+  #slide-7 {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .next-steps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    flex: 1;
+    justify-content: center;
+  }
+
+  .next-step-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 28px;
+    padding: 22px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .next-step-row:first-child {
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .next-step-num {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--accent);
+    min-width: 36px;
+    flex-shrink: 0;
+    line-height: 1.4;
+  }
+
+  .next-step-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .next-step-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--white);
+  }
+
+  .next-step-desc {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+
+  .owner-badge {
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 5px 14px;
+    border-radius: 100px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    align-self: flex-start;
+    margin-top: 2px;
+  }
+
+  /* ============================================
+     SLIDE 8 — APPENDIX
+  ============================================ */
+  #slide-8 {
+    display: flex;
+    flex-direction: column;
+    background: #0F2A32;
+  }
+
+  .appendix-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    flex: 1;
+    justify-content: center;
+  }
+
+  .appendix-row {
+    display: flex;
+    align-items: baseline;
+    gap: 24px;
+    padding: 22px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .appendix-row:first-child {
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .appendix-label {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent);
+    min-width: 280px;
+    flex-shrink: 0;
+  }
+
+  .appendix-url {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--muted);
+    font-family: 'Courier New', Courier, monospace;
+    word-break: break-all;
+  }
+</style>
+</head>
+<body>
+
+<div id="viewport">
+  <div id="canvas-wrapper">
+    <div class="slide-canvas">
+
+      <!-- SLIDE 1: TITLE -->
+      <div class="slide active" id="slide-1">
+        <div class="s1-top-label">PROGRAM STATUS UPDATE</div>
+        <div class="s1-title">Agentic Apps<br>Workshop</div>
+        <div class="s1-subtitle">AI Specialist Team &middot; June 2025</div>
+        <div class="s1-author">Robert Mosley</div>
+        <div class="s1-rule"></div>
+      </div>
+
+      <!-- SLIDE 2: OBJECTIVES -->
+      <div class="slide" id="slide-2">
+        <div class="section-label">WHY THIS EXISTS</div>
+        <div class="slide-title">What We Set Out to Build</div>
+        <div class="obj-grid">
+          <div class="obj-card">
+            <div class="obj-card-title">Agents + Apps + Lakebase</div>
+            <div class="obj-card-body">A lab centered on building real agentic apps: UC Functions as tools, Databricks Apps as the deployment target, Lakebase for conversation memory.</div>
+          </div>
+          <div class="obj-card">
+            <div class="obj-card-title">Full AgentOps Lifecycle</div>
+            <div class="obj-card-body">Not just building &mdash; evaluating and improving. MLflow tracing, eval datasets, LLM judges, scored eval runs, before-and-after proof.</div>
+          </div>
+          <div class="obj-card">
+            <div class="obj-card-title">Two Hours or a Full Day</div>
+            <div class="obj-card-body">Flexible delivery: standard 2-hour run with sample data, or stretched to a full day with a customer&rsquo;s declared use case.</div>
+          </div>
+          <div class="obj-card">
+            <div class="obj-card-title">Vibe Coding as the Vehicle</div>
+            <div class="obj-card-body">Piggyback on customer interest in AI-assisted coding. Participants build entirely through prompting Claude via Coda &mdash; no raw code required.</div>
+          </div>
+        </div>
+        <div class="obj-caption">Scripted (industry-specific scenarios) or customized (customer&rsquo;s own use case). Same arc either way.</div>
+      </div>
+
+      <!-- SLIDE 3: LANDSCAPE -->
+      <div class="slide" id="slide-3">
+        <div class="section-label">LANDSCAPE</div>
+        <div class="slide-title" style="margin-bottom:28px;">How This Fits the Workshop Portfolio</div>
+        <table class="landscape-table">
+          <thead>
+            <tr>
+              <th class="dim-col">Dimension</th>
+              <th class="ours">Vibe Coding Workshop (Ours)</th>
+              <th>Vibe to Value</th>
+              <th>APJ Workshop-in-a-Box</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="dim-col">Duration</td>
+              <td class="ours">~2 hrs (extendable to full day)</td>
+              <td>1&ndash;2 day working session</td>
+              <td>Half-day to 2 days (3 tiers)</td>
+            </tr>
+            <tr>
+              <td class="dim-col">Approach</td>
+              <td class="ours">Pure vibe coding &mdash; describe intent, Claude builds</td>
+              <td>Guided &mdash; PRD + generated prompts + structured path</td>
+              <td>Directed &mdash; traditional build flow, production-grade</td>
+            </tr>
+            <tr>
+              <td class="dim-col">Agent eval depth</td>
+              <td class="ours">Full lifecycle: traces &rarr; dataset &rarr; judges &rarr; scored eval</td>
+              <td>Improving &mdash; agent eval being actively added</td>
+              <td>Tier-dependent &mdash; strong at L300, lighter at L100/200</td>
+            </tr>
+            <tr>
+              <td class="dim-col">Setup complexity</td>
+              <td class="ours">Low &mdash; SA-run 1 week ahead, sample data included</td>
+              <td>Higher &mdash; use-case scoping + PRD generation upfront</td>
+              <td>Higher &mdash; SA-led, structured prereqs per tier</td>
+            </tr>
+            <tr>
+              <td class="dim-col">Risk / note</td>
+              <td class="ours" style="color: var(--amber); font-weight: 500;">Not yet run with a customer</td>
+              <td>DE-heavy origin; AI consumption not the primary driver</td>
+              <td>Strong workshop &mdash; not specifically vibe-coding oriented</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- SLIDE 4: POSITIONING -->
+      <div class="slide" id="slide-4">
+        <div class="section-label">POSITIONING</div>
+        <div class="slide-title">Not Competing &mdash; Sequencing</div>
+        <div class="flow-container">
+          <!-- Left box -->
+          <div class="flow-box flow-box-left">
+            <div class="flow-box-title">Our Workshop</div>
+            <div class="flow-box-body">2-hour entry point. Customer builds an agent, runs evals, sees before/after scores. Surfaces readiness for the next step.</div>
+          </div>
+
+          <!-- Fork SVG -->
+          <svg class="fork-svg" width="120" height="360" viewBox="0 0 120 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <!-- horizontal line from left box -->
+            <line x1="0" y1="180" x2="40" y2="180" stroke="#8AABAF" stroke-width="2"/>
+            <!-- vertical connector -->
+            <line x1="40" y1="90" x2="40" y2="270" stroke="#8AABAF" stroke-width="2"/>
+            <!-- branch to Path A (top) -->
+            <line x1="40" y1="90" x2="100" y2="90" stroke="#8AABAF" stroke-width="2"/>
+            <!-- arrowhead top -->
+            <polygon points="100,83 110,90 100,97" fill="#8AABAF"/>
+            <!-- branch to Path B (bottom) -->
+            <line x1="40" y1="270" x2="100" y2="270" stroke="#8AABAF" stroke-width="2"/>
+            <!-- arrowhead bottom -->
+            <polygon points="100,263 110,270 100,277" fill="#8AABAF"/>
+          </svg>
+
+          <!-- Right boxes -->
+          <div class="flow-right-boxes">
+            <div class="flow-box flow-box-right">
+              <div class="flow-box-title">Path A &mdash; Vibe to Value</div>
+              <div class="flow-box-body">Customer needs more structure. They don&rsquo;t know how to scope a use case or architect a solution. V2V provides the PRD, the prompts, and the guided path. Think: solution architecture for AI.</div>
+            </div>
+            <div class="flow-box flow-box-right">
+              <div class="flow-box-title">Path B &mdash; APJ Workshop-in-a-Box</div>
+              <div class="flow-box-body">Customer wants to understand how to build properly &mdash; not just vibe their way through it. They want confidence in the result. Traditional, production-grade, 1&ndash;2 days.</div>
+            </div>
+          </div>
+        </div>
+        <div class="flow-caption">Our workshop creates the appetite. V2V and APJ satisfy it.</div>
+      </div>
+
+      <!-- SLIDE 5: CHALLENGES -->
+      <div class="slide" id="slide-5">
+        <div class="section-label">LESSONS LEARNED</div>
+        <div class="slide-title">What Made This Hard</div>
+        <div class="challenge-row">
+          <div class="challenge-card">
+            <div class="challenge-num">1</div>
+            <div class="challenge-title">Customer Environment Compatibility</div>
+            <div class="challenge-body">Vibe coding requires tooling &mdash; Databricks CLI, AI Dev Kit &mdash; that can&rsquo;t be assumed in customer environments. Answer: Coda. Native to Databricks, pre-installs everything needed, zero customer setup friction.<br><br>This also exposed a real issue: security practices around LiteLLM are blocking model calls in some environments. Hit it during build, verified it&rsquo;s happening in customer environments this week. A fix is in motion.</div>
+          </div>
+          <div class="challenge-card">
+            <div class="challenge-num">2</div>
+            <div class="challenge-title">Ownership and Scope Creep</div>
+            <div class="challenge-body">The more we tried to share the load, the more the scope fragmented. Narrowed ownership to one person &mdash; hit the LiteLLM blocker. Relearned the lesson and consolidated further. Ended up primarily solo-built.<br><br>Distributed ownership of a workshop is harder than it looks.</div>
+          </div>
+          <div class="challenge-card">
+            <div class="challenge-num">3</div>
+            <div class="challenge-title">Calibrating the Lab Itself</div>
+            <div class="challenge-body">Getting the quality issues right &mdash; systematic enough to show up in evals, discoverable by participants, fixable within the time budget &mdash; took significant iteration.<br><br>Keeping the vibe coding arc natural without it devolving into hand-holding required careful design.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SLIDE 6: STATUS -->
+      <div class="slide" id="slide-6">
+        <div class="section-label">STATUS</div>
+        <div class="slide-title">Current State</div>
+        <div class="status-list">
+          <div class="status-row">
+            <div class="status-dot amber"></div>
+            <div class="status-item-name">Lab</div>
+            <div class="status-item-desc">Built and functional. Reference agent deploys, setup scripts are idempotent. Needs internal testing run, then a test customer before GA.</div>
+          </div>
+          <div class="status-row">
+            <div class="status-dot amber"></div>
+            <div class="status-item-name">Facilitator Materials</div>
+            <div class="status-item-desc">Field card, BU lead summary, and ambassador enablement deck drafted. Need review and refinement &mdash; not final.</div>
+          </div>
+          <div class="status-row">
+            <div class="status-dot amber"></div>
+            <div class="status-item-name">Go Page</div>
+            <div class="status-item-desc">Content drafted. Needs to work with Soumik Paul to populate and publish go/agenticapps.</div>
+          </div>
+          <div class="status-row">
+            <div class="status-dot amber"></div>
+            <div class="status-item-name">Ambassador Pipeline</div>
+            <div class="status-item-desc">Being planned. Manufacturing session scheduled soon. Retail: pre-summit touchpoint mid-June, formal training late June.</div>
+          </div>
+          <div class="status-row">
+            <div class="status-dot red"></div>
+            <div class="status-item-name" style="color: var(--red-status);">LiteLLM / SEG Fix</div>
+            <div class="status-item-desc">Blocking issue in some customer environments. Verified this week. Fix in motion &mdash; not resolved.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SLIDE 7: NEXT STEPS -->
+      <div class="slide" id="slide-7">
+        <div class="section-label">WHAT'S NEXT</div>
+        <div class="slide-title">Next Steps</div>
+        <div class="next-steps-list">
+          <div class="next-step-row">
+            <div class="next-step-num">1</div>
+            <div class="next-step-content">
+              <div class="next-step-title">Internal testing run</div>
+              <div class="next-step-desc">Validate full lab arc end-to-end in a clean workspace.</div>
+            </div>
+            <div class="owner-badge">Robert</div>
+          </div>
+          <div class="next-step-row">
+            <div class="next-step-num">2</div>
+            <div class="next-step-content">
+              <div class="next-step-title">Ramp-up materials with Soumik</div>
+              <div class="next-step-desc">Build out go/agenticapps content and supporting enablement.</div>
+            </div>
+            <div class="owner-badge">Robert + Soumik</div>
+          </div>
+          <div class="next-step-row">
+            <div class="next-step-num">3</div>
+            <div class="next-step-content">
+              <div class="next-step-title">Ambassador enablement</div>
+              <div class="next-step-desc">Manufacturing (soon). Retail: pre-summit touchpoint mid-June, formal training late June.</div>
+            </div>
+            <div class="owner-badge">Robert</div>
+          </div>
+          <div class="next-step-row">
+            <div class="next-step-num">4</div>
+            <div class="next-step-content">
+              <div class="next-step-title">First test customer</div>
+              <div class="next-step-desc">Identify account, run the lab, capture eval scores as leave-behind.</div>
+            </div>
+            <div class="owner-badge">Robert + AE partner</div>
+          </div>
+          <div class="next-step-row">
+            <div class="next-step-num">5</div>
+            <div class="next-step-content">
+              <div class="next-step-title">V2V collaboration</div>
+              <div class="next-step-desc">Continue testing and iterating on the agent development motion.</div>
+            </div>
+            <div class="owner-badge">Robert + V2V team</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SLIDE 8: APPENDIX -->
+      <div class="slide" id="slide-8">
+        <div class="section-label">APPENDIX</div>
+        <div class="slide-title">Materials</div>
+        <div class="appendix-list">
+          <div class="appendix-row">
+            <div class="appendix-label">Workshop repo</div>
+            <div class="appendix-url">https://github.com/rmosleydb/databricks-agentic-app-workshop</div>
+          </div>
+          <div class="appendix-row">
+            <div class="appendix-label">Workshop guide</div>
+            <div class="appendix-url">https://docs.google.com/document/d/1eFtU9o973hTLh8vfmtMm3yTX78ozKpU2Y2p010a282k/edit</div>
+          </div>
+          <div class="appendix-row">
+            <div class="appendix-label">Field card</div>
+            <div class="appendix-url">docs/slides/field-card.html (in repo)</div>
+          </div>
+          <div class="appendix-row">
+            <div class="appendix-label">Ambassador enablement</div>
+            <div class="appendix-url">docs/slides/ambassador-enablement.html (in repo)</div>
+          </div>
+          <div class="appendix-row">
+            <div class="appendix-label">BU lead summary</div>
+            <div class="appendix-url">docs/slides/bu-lead-summary.html (in repo)</div>
+          </div>
+          <div class="appendix-row">
+            <div class="appendix-label">Go Page content draft</div>
+            <div class="appendix-url">docs/go-page-content.md (in repo)</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- .slide-canvas -->
+  </div><!-- #canvas-wrapper -->
+</div><!-- #viewport -->
+
+<div id="slide-counter">1 / 8</div>
+
+<script>
+  const TOTAL = 8;
+  const STORAGE_KEY = 'program-status-slide';
+
+  let current = 1;
+
+  function getSaved() {
+    try {
+      const v = localStorage.getItem(STORAGE_KEY);
+      if (v) {
+        const n = parseInt(v, 10);
+        if (n >= 1 && n <= TOTAL) return n;
+      }
+    } catch(e) {}
+    return 1;
+  }
+
+  function save(n) {
+    try { localStorage.setItem(STORAGE_KEY, String(n)); } catch(e) {}
+  }
+
+  function showSlide(n) {
+    if (n < 1) n = 1;
+    if (n > TOTAL) n = TOTAL;
+    current = n;
+
+    document.querySelectorAll('.slide').forEach(function(s, i) {
+      s.classList.toggle('active', i + 1 === current);
+    });
+
+    // Slide 8 has different bg
+    const canvas = document.querySelector('.slide-canvas');
+    canvas.style.background = current === 8 ? '#0F2A32' : '#0B2026';
+
+    document.getElementById('slide-counter').textContent = current + ' / ' + TOTAL;
+    save(current);
+  }
+
+  function scaleCanvas() {
+    const wrapper = document.getElementById('canvas-wrapper');
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const scale = Math.min(vw / 1920, vh / 1080);
+    const scaledW = 1920 * scale;
+    const scaledH = 1080 * scale;
+    const offsetX = Math.max(0, (vw - scaledW) / 2);
+    const offsetY = Math.max(0, (vh - scaledH) / 2);
+    wrapper.style.transform = 'scale(' + scale + ')';
+    wrapper.style.transformOrigin = 'top left';
+    wrapper.style.marginLeft = offsetX + 'px';
+    wrapper.style.marginTop = offsetY + 'px';
+  }
+
+  // Navigation
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'Space') {
+      e.preventDefault();
+      showSlide(current + 1);
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      showSlide(current - 1);
+    }
+  });
+
+  document.addEventListener('click', function(e) {
+    const vw = window.innerWidth;
+    if (e.clientX > vw * (2/3)) {
+      showSlide(current + 1);
+    } else if (e.clientX < vw * (1/3)) {
+      showSlide(current - 1);
+    }
+  });
+
+  window.addEventListener('resize', scaleCanvas);
+
+  // Init
+  current = getSaved();
+  showSlide(current);
+  scaleCanvas();
+</script>
+</body>
+</html>
