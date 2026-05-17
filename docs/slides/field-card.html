@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vibe Coding Workshop — Field Card</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0B2026;
+    --accent: #FF3621;
+    --surface: #112830;
+    --white: #FFFFFF;
+    --muted: #8AABAF;
+    --font: 'Inter', sans-serif;
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+    font-family: var(--font);
+  }
+
+  #stage {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #deck {
+    width: 1920px;
+    height: 1080px;
+    position: relative;
+    transform-origin: top left;
+  }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    width: 1920px;
+    height: 1080px;
+    background: var(--bg);
+    display: none;
+    padding: 80px 100px;
+  }
+
+  .slide.active { display: flex; flex-direction: column; }
+
+  /* Navigation click zones */
+  #nav-prev, #nav-next {
+    position: fixed;
+    top: 0;
+    height: 100%;
+    cursor: pointer;
+    z-index: 100;
+  }
+  #nav-prev { left: 0; width: 33.333%; }
+  #nav-next { right: 0; width: 66.667%; }
+
+  /* Slide counter */
+  #counter {
+    position: fixed;
+    bottom: 24px;
+    right: 32px;
+    color: var(--white);
+    font-family: var(--font);
+    font-size: 18px;
+    font-weight: 500;
+    opacity: 0.5;
+    z-index: 200;
+    pointer-events: none;
+  }
+
+  /* ── Shared components ── */
+  .section-label {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+
+  .slide-title {
+    font-size: 64px;
+    font-weight: 700;
+    color: var(--white);
+    line-height: 1.1;
+    margin-bottom: 16px;
+  }
+
+  .slide-subtitle {
+    font-size: 32px;
+    font-weight: 500;
+    color: var(--accent);
+    margin-bottom: 48px;
+  }
+
+  /* ── Slide 1 — Title ── */
+  #slide-1 {
+    justify-content: space-between;
+  }
+  .s1-top {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  .s1-center {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .s1-title {
+    font-size: 96px;
+    font-weight: 700;
+    color: var(--white);
+    line-height: 1.0;
+    margin-bottom: 24px;
+  }
+  .s1-subtitle {
+    font-size: 40px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .s1-bottom {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .s1-rule {
+    width: 100%;
+    height: 2px;
+    background: var(--accent);
+  }
+  .s1-footer {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+  }
+
+  /* ── Slide 2 — What Participants Build ── */
+  .build-list {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    flex: 1;
+    margin-bottom: 24px;
+  }
+  .build-item {
+    border-left: 3px solid var(--accent);
+    padding: 16px 24px;
+    background: var(--surface);
+    font-size: 22px;
+    font-weight: 400;
+    color: var(--white);
+    line-height: 1.5;
+  }
+  .s2-badge {
+    align-self: flex-end;
+    border: 1.5px solid var(--accent);
+    color: var(--white);
+    font-size: 15px;
+    font-weight: 600;
+    padding: 10px 22px;
+    letter-spacing: 0.04em;
+  }
+
+  /* ── Slide 3 — Learning Arc ── */
+  .arc-cards {
+    display: flex;
+    gap: 24px;
+    flex: 1;
+    align-items: stretch;
+  }
+  .arc-card {
+    flex: 1;
+    background: var(--surface);
+    padding: 40px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .arc-num {
+    font-size: 72px;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1;
+  }
+  .arc-name {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--white);
+  }
+  .arc-desc {
+    font-size: 17px;
+    font-weight: 400;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .arc-caption {
+    font-size: 18px;
+    font-style: italic;
+    color: var(--muted);
+    margin-top: 24px;
+    text-align: center;
+  }
+
+  /* ── Slide 4 — When to Use ── */
+  .fit-cols {
+    display: flex;
+    gap: 32px;
+    flex: 1;
+  }
+  .fit-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  .fit-header {
+    padding: 20px 28px;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--white);
+    margin-bottom: 0;
+  }
+  .fit-header.good { background: rgba(40, 160, 80, 0.18); }
+  .fit-header.bad  { background: rgba(255, 54, 33, 0.15); }
+  .fit-body {
+    background: var(--surface);
+    flex: 1;
+    padding: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .fit-bullet {
+    font-size: 19px;
+    font-weight: 400;
+    color: var(--white);
+    line-height: 1.5;
+    padding-left: 20px;
+    position: relative;
+  }
+  .fit-bullet::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 11px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+
+  /* ── Slide 5 — How to Request ── */
+  .steps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    flex: 1;
+  }
+  .step-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 28px;
+  }
+  .step-num {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--accent);
+    min-width: 48px;
+    line-height: 1.2;
+  }
+  .step-text {
+    font-size: 24px;
+    font-weight: 400;
+    color: var(--white);
+    line-height: 1.5;
+    padding-top: 4px;
+  }
+  .repo-box {
+    background: var(--surface);
+    border-left: 3px solid var(--accent);
+    padding: 20px 28px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 18px;
+    color: var(--muted);
+    margin-top: 16px;
+    word-break: break-all;
+  }
+
+  /* ── Slide 6 — Internal ── */
+  #slide-6 {
+    background: #F0F0F0;
+  }
+  .s6-title {
+    font-size: 64px;
+    font-weight: 700;
+    color: #0B2026;
+    margin-bottom: 40px;
+  }
+  .s6-body {
+    font-size: 22px;
+    font-weight: 400;
+    color: #0B2026;
+    line-height: 1.7;
+    flex: 1;
+  }
+  .s6-link {
+    color: var(--accent);
+    text-decoration: none;
+    word-break: break-all;
+  }
+  .s6-link:hover { text-decoration: underline; }
+  .s6-footer {
+    font-size: 16px;
+    font-style: italic;
+    color: #555;
+    margin-top: 32px;
+  }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div id="deck">
+
+    <!-- Slide 1 — Title -->
+    <div class="slide active" id="slide-1">
+      <div class="s1-top">FIELD CARD</div>
+      <div class="s1-center">
+        <div class="s1-title">Vibe Coding Workshop</div>
+        <div class="s1-subtitle">Agentic Apps — Standard Lab</div>
+      </div>
+      <div class="s1-bottom">
+        <div class="s1-rule"></div>
+        <div class="s1-footer">AI Specialist Team &middot; FY27</div>
+      </div>
+    </div>
+
+    <!-- Slide 2 — What Participants Build -->
+    <div class="slide" id="slide-2">
+      <div class="section-label">The Workshop</div>
+      <div class="slide-title">What Participants Build</div>
+      <div class="build-list">
+        <div class="build-item">A retail customer-service AI agent — built entirely through prompting Claude</div>
+        <div class="build-item">4 UC Functions as tools: product search, order status, product details, return policy</div>
+        <div class="build-item">Agent with conversation memory (Lakebase), deployed as a Databricks App</div>
+        <div class="build-item">Evaluation pipeline: traced conversations &rarr; labeled dataset &rarr; LLM judges &rarr; scored eval run</div>
+        <div class="build-item">Before-and-after proof: eval scores improve after fixing a real quality issue</div>
+      </div>
+      <div class="s2-badge">~2 hours &middot; Sample data included</div>
+    </div>
+
+    <!-- Slide 3 — The Learning Arc -->
+    <div class="slide" id="slide-3">
+      <div class="section-label">The Journey</div>
+      <div class="slide-title">Five Steps. One Agent Lifecycle.</div>
+      <div class="arc-cards">
+        <div class="arc-card">
+          <div class="arc-num">1</div>
+          <div class="arc-name">Explore</div>
+          <div class="arc-desc">Understand the data in Unity Catalog</div>
+        </div>
+        <div class="arc-card">
+          <div class="arc-num">2</div>
+          <div class="arc-name">Build</div>
+          <div class="arc-desc">Create UC Functions + deploy agent app with memory</div>
+        </div>
+        <div class="arc-card">
+          <div class="arc-num">3</div>
+          <div class="arc-name">Break</div>
+          <div class="arc-desc">Chat with the agent, discover quality issues</div>
+        </div>
+        <div class="arc-card">
+          <div class="arc-num">4</div>
+          <div class="arc-name">Evaluate</div>
+          <div class="arc-desc">Traces &rarr; dataset &rarr; judges &rarr; eval run</div>
+        </div>
+        <div class="arc-card">
+          <div class="arc-num">5</div>
+          <div class="arc-name">Fix</div>
+          <div class="arc-desc">Add guardrails, redeploy, prove scores improved</div>
+        </div>
+      </div>
+      <div class="arc-caption">Participants drive every step. Claude does the work.</div>
+    </div>
+
+    <!-- Slide 4 — When to Use -->
+    <div class="slide" id="slide-4">
+      <div class="section-label">Fit Guide</div>
+      <div class="slide-title">When to Deploy This</div>
+      <div class="fit-cols">
+        <div class="fit-col">
+          <div class="fit-header good">Good fit</div>
+          <div class="fit-body">
+            <div class="fit-bullet">Customer wants to see an agent built end-to-end</div>
+            <div class="fit-bullet">Technical team present and wants keyboard time</div>
+            <div class="fit-bullet">Sales stage U2/U3 — use case defined or being scoped</div>
+            <div class="fit-bullet">Team wants to understand agent eval and hardening</div>
+            <div class="fit-bullet">First exposure to Databricks Apps, Lakebase, or MLflow evals</div>
+          </div>
+        </div>
+        <div class="fit-col">
+          <div class="fit-header bad">Not the right fit</div>
+          <div class="fit-body">
+            <div class="fit-bullet">No technical team in the room</div>
+            <div class="fit-bullet">Customer still exploring use cases &rarr; Agent Bricks instead</div>
+            <div class="fit-bullet">Need customer's own data same day &rarr; plan custom path ahead</div>
+            <div class="fit-bullet">Less than 90 minutes available</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 5 — How to Request -->
+    <div class="slide" id="slide-5">
+      <div class="section-label">Activation</div>
+      <div class="slide-title">How to Request</div>
+      <div class="steps-list">
+        <div class="step-item">
+          <div class="step-num">1</div>
+          <div class="step-text">File ASQ in Salesforce — Overlay SA option</div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">2</div>
+          <div class="step-text">SA/DSA owns and delivers — AE sets up and captures outcomes</div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">3</div>
+          <div class="step-text">Allow 1 week lead time for workspace setup</div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">4</div>
+          <div class="step-text">Participants need: Databricks workspace access + Coda installed</div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">5</div>
+          <div class="step-text">After the session: update POC status to Active in Salesforce</div>
+        </div>
+      </div>
+      <div class="repo-box">https://github.com/rmosleydb/databricks-agentic-app-workshop</div>
+    </div>
+
+    <!-- Slide 6 — Internal Instructions -->
+    <div class="slide" id="slide-6">
+      <div class="s6-title">How to Use These Slides</div>
+      <div class="s6-body">
+        <p style="margin-bottom:24px;">Insert slides 1&ndash;5 of this deck between slides 5 and 6 of the AI Hands-On Module Playbook.</p>
+        <p style="margin-bottom:12px;"><strong>Playbook link:</strong><br>
+          <a class="s6-link" href="https://docs.google.com/presentation/d/1k1k57yy5bRYo9WAWKIgMhcKlekjueIoNJZEiBk2YR2g" target="_blank">
+            https://docs.google.com/presentation/d/1k1k57yy5bRYo9WAWKIgMhcKlekjueIoNJZEiBk2YR2g
+          </a>
+        </p>
+        <p style="margin-top:24px;">Slide 5 of the playbook is the last &lsquo;Choosing the Right Module&rsquo; content slide. These slides replace the existing Vibe Coding placeholder slides &mdash; review those first and delete them after inserting.</p>
+      </div>
+      <div class="s6-footer">This slide is for internal use &mdash; delete before sharing with customers or field teams.</div>
+    </div>
+
+  </div><!-- /deck -->
+</div><!-- /stage -->
+
+<div id="nav-prev"></div>
+<div id="nav-next"></div>
+<div id="counter"></div>
+
+<script>
+  const STORAGE_KEY = 'field-card-slide';
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = parseInt(localStorage.getItem(STORAGE_KEY) || '0', 10);
+  if (current < 0 || current >= total) current = 0;
+
+  function show(idx) {
+    slides.forEach((s, i) => {
+      s.classList.toggle('active', i === idx);
+    });
+    current = idx;
+    localStorage.setItem(STORAGE_KEY, idx);
+    document.getElementById('counter').textContent = (idx + 1) + ' / ' + total;
+  }
+
+  function next() { if (current < total - 1) show(current + 1); }
+  function prev() { if (current > 0) show(current - 1); }
+
+  document.getElementById('nav-next').addEventListener('click', next);
+  document.getElementById('nav-prev').addEventListener('click', prev);
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next();
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   prev();
+  });
+
+  function scale() {
+    const deck = document.getElementById('deck');
+    const sw = window.innerWidth;
+    const sh = window.innerHeight;
+    const s = Math.min(sw / 1920, sh / 1080);
+    deck.style.transform = 'scale(' + s + ')';
+    deck.style.marginLeft = ((sw - 1920 * s) / 2) + 'px';
+    deck.style.marginTop  = ((sh - 1080 * s) / 2) + 'px';
+  }
+
+  window.addEventListener('resize', scale);
+  scale();
+  show(current);
+</script>
+</body>
+</html>

@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vibe Coding Workshop — Ambassador Enablement Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0B2026;
+    --accent: #FF3621;
+    --surface: #112830;
+    --white: #FFFFFF;
+    --muted: #8AABAF;
+    --font: 'Inter', sans-serif;
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+    font-family: var(--font);
+  }
+
+  #stage {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #deck {
+    width: 1920px;
+    height: 1080px;
+    position: relative;
+    transform-origin: top left;
+  }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    width: 1920px;
+    height: 1080px;
+    background: var(--bg);
+    display: none;
+    padding: 72px 100px;
+  }
+
+  .slide.active { display: flex; flex-direction: column; }
+
+  #nav-prev, #nav-next {
+    position: fixed;
+    top: 0;
+    height: 100%;
+    cursor: pointer;
+    z-index: 100;
+  }
+  #nav-prev { left: 0; width: 33.333%; }
+  #nav-next { right: 0; width: 66.667%; }
+
+  #counter {
+    position: fixed;
+    bottom: 24px;
+    right: 32px;
+    color: var(--white);
+    font-family: var(--font);
+    font-size: 18px;
+    font-weight: 500;
+    opacity: 0.5;
+    z-index: 200;
+    pointer-events: none;
+  }
+
+  /* ── Shared ── */
+  .section-label {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  .slide-title {
+    font-size: 58px;
+    font-weight: 700;
+    color: var(--white);
+    line-height: 1.1;
+    margin-bottom: 12px;
+  }
+
+  .slide-subtitle {
+    font-size: 24px;
+    font-weight: 400;
+    color: var(--muted);
+    margin-bottom: 36px;
+  }
+
+  /* ── Slide 1 — Title ── */
+  #slide-1 { justify-content: space-between; }
+  .s1-label { font-size: 14px; font-weight: 600; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
+  .s1-center { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+  .s1-main-title { font-size: 96px; font-weight: 700; color: var(--white); line-height: 1.0; margin-bottom: 24px; }
+  .s1-subtitle { font-size: 40px; font-weight: 600; color: var(--accent); }
+  .s1-bottom { display: flex; flex-direction: column; gap: 14px; }
+  .s1-rule { width: 100%; height: 2px; background: var(--accent); }
+  .s1-footer { font-size: 16px; font-weight: 500; color: var(--muted); }
+
+  /* ── Slide 2 — Motion ── */
+  .two-cards {
+    display: flex;
+    gap: 32px;
+    flex: 1;
+  }
+  .motion-card {
+    flex: 1;
+    background: var(--surface);
+    padding: 48px 44px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .motion-card-header {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .motion-card-body {
+    font-size: 21px;
+    font-weight: 400;
+    color: var(--white);
+    line-height: 1.65;
+    flex: 1;
+  }
+
+  /* ── Slide 3 — Field Motion Fit ── */
+  .module-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    flex: 1;
+  }
+  .module-row {
+    background: var(--surface);
+    padding: 28px 36px;
+    display: flex;
+    align-items: center;
+    gap: 48px;
+  }
+  .module-row.highlighted {
+    background: #1A2E35;
+    border-left: 4px solid var(--accent);
+  }
+  .module-name {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--white);
+    min-width: 400px;
+  }
+  .module-row.highlighted .module-name {
+    color: var(--white);
+    font-weight: 700;
+  }
+  .module-desc {
+    font-size: 20px;
+    font-weight: 400;
+    color: var(--muted);
+    flex: 1;
+  }
+  .module-row.highlighted .module-desc {
+    color: var(--white);
+    font-weight: 500;
+  }
+  .module-stage {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--muted);
+    min-width: 120px;
+    text-align: right;
+  }
+  .module-row.highlighted .module-stage {
+    color: var(--accent);
+  }
+  .s3-caption {
+    font-size: 18px;
+    font-style: italic;
+    color: var(--muted);
+    margin-top: 24px;
+    text-align: center;
+  }
+
+  /* ── Slide 4 — Tech Stack ── */
+  .tech-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    gap: 20px;
+    flex: 1;
+  }
+  .tech-card {
+    background: var(--surface);
+    padding: 28px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .tech-name {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .tech-desc {
+    font-size: 17px;
+    font-weight: 400;
+    color: var(--white);
+    line-height: 1.5;
+  }
+
+  /* ── Slide 5 — Pre-Workshop Setup ── */
+  .setup-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    flex: 1;
+  }
+  .setup-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 24px;
+  }
+  .setup-num {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--accent);
+    min-width: 44px;
+    line-height: 1.2;
+  }
+  .setup-text {
+    font-size: 21px;
+    font-weight: 400;
+    color: var(--white);
+    line-height: 1.5;
+    padding-top: 2px;
+  }
+  .setup-text a {
+    color: var(--muted);
+    text-decoration: none;
+  }
+
+  /* ── Slide 6 — Session Arc / Table ── */
+  .session-table {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    overflow: hidden;
+  }
+  .table-header {
+    display: grid;
+    grid-template-columns: 2fr 1fr 4fr;
+    background: transparent;
+    padding: 0 0 8px;
+    border-bottom: 1px solid var(--muted);
+    margin-bottom: 4px;
+  }
+  .th {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-transform: uppercase;
+    padding: 8px 16px;
+  }
+  .table-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr 4fr;
+    align-items: center;
+    padding: 2px 0;
+  }
+  .table-row.support-row {
+    background: rgba(255, 54, 33, 0.07);
+    border-left: 3px solid var(--accent);
+  }
+  .td {
+    font-size: 18px;
+    font-weight: 400;
+    color: var(--white);
+    padding: 12px 16px;
+    line-height: 1.4;
+  }
+  .table-row.support-row .td { font-weight: 600; }
+  .td.phase { font-weight: 600; }
+  .td.duration { color: var(--muted); }
+  .support-tag {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 2px 8px;
+    margin-left: 12px;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+  }
+  .s6-caption {
+    font-size: 16px;
+    font-style: italic;
+    color: var(--muted);
+    margin-top: 16px;
+    text-align: center;
+  }
+
+  /* ── Slide 7 — Facilitating Step 2 ── */
+  .two-cols {
+    display: flex;
+    gap: 40px;
+    flex: 1;
+  }
+  .blockers-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .blockers-header {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .blocker-item {
+    font-size: 19px;
+    font-weight: 400;
+    color: var(--white);
+    line-height: 1.55;
+    padding-left: 20px;
+    position: relative;
+  }
+  .blocker-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 10px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .fallback-card {
+    flex: 0 0 560px;
+    background: var(--surface);
+    padding: 40px 44px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .fallback-header {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .fallback-body {
+    font-size: 19px;
+    font-weight: 400;
+    color: var(--white);
+    line-height: 1.65;
+    flex: 1;
+  }
+
+  /* ── Slide 8 — Facilitating Step 4 ── */
+  .substeps {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    flex: 1;
+  }
+  .substep {
+    display: flex;
+    align-items: flex-start;
+    gap: 28px;
+    background: var(--surface);
+    padding: 24px 32px;
+  }
+  .substep-num {
+    font-size: 40px;
+    font-weight: 700;
+    color: var(--accent);
+    min-width: 64px;
+    line-height: 1.1;
+  }
+  .substep-content { flex: 1; }
+  .substep-name {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--white);
+    margin-bottom: 6px;
+  }
+  .substep-desc {
+    font-size: 18px;
+    font-weight: 400;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .s8-note {
+    font-size: 15px;
+    font-weight: 400;
+    color: var(--muted);
+    font-style: italic;
+    margin-top: 16px;
+    padding: 12px 20px;
+    border-left: 2px solid var(--surface);
+  }
+
+  /* ── Slide 9 — What Good Looks Like ── */
+  .good-cols {
+    display: flex;
+    gap: 40px;
+    flex: 1;
+  }
+  .good-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .good-col-header {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--surface);
+  }
+  .good-bullet {
+    font-size: 20px;
+    font-weight: 400;
+    color: var(--white);
+    line-height: 1.55;
+    padding-left: 22px;
+    position: relative;
+  }
+  .good-bullet::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 11px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+
+  /* ── Slide 10 — Customization ── */
+  .custom-cols {
+    display: flex;
+    gap: 40px;
+    flex: 1;
+  }
+  .custom-col {
+    flex: 1;
+    background: var(--surface);
+    padding: 40px 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .custom-col-header {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .custom-item {
+    font-size: 19px;
+    font-weight: 400;
+    color: var(--white);
+    line-height: 1.55;
+    padding-left: 20px;
+    position: relative;
+  }
+  .custom-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 10px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .s10-caption {
+    font-size: 17px;
+    font-style: italic;
+    color: var(--muted);
+    margin-top: 20px;
+    text-align: center;
+  }
+
+  /* ── Slide 11 — Resources ── */
+  .resources-list {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    flex: 1;
+    justify-content: center;
+  }
+  .resource-item {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+  }
+  .resource-label {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent);
+    min-width: 320px;
+    flex-shrink: 0;
+  }
+  .resource-value {
+    font-size: 18px;
+    font-weight: 400;
+    color: var(--white);
+    line-height: 1.5;
+  }
+  .resource-value a {
+    color: var(--muted);
+    text-decoration: none;
+    word-break: break-all;
+  }
+  .resource-value a:hover { color: var(--white); }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div id="deck">
+
+    <!-- Slide 1 — Title -->
+    <div class="slide active" id="slide-1">
+      <div class="s1-label">For AI Ambassadors</div>
+      <div class="s1-center">
+        <div class="s1-main-title">Vibe Coding Workshop</div>
+        <div class="s1-subtitle">Ambassador Enablement Guide</div>
+      </div>
+      <div class="s1-bottom">
+        <div class="s1-rule"></div>
+        <div class="s1-footer">AI Specialist Team &middot; FY27</div>
+      </div>
+    </div>
+
+    <!-- Slide 2 — Why This Workshop Exists -->
+    <div class="slide" id="slide-2">
+      <div class="slide-title">The Motion</div>
+      <div class="two-cards">
+        <div class="motion-card">
+          <div class="motion-card-header">What customers need</div>
+          <div class="motion-card-body">Technical teams know they need AI agents. They struggle to get past prototype &mdash; no clear path to measure quality, harden behavior, or prove it works before production.</div>
+        </div>
+        <div class="motion-card">
+          <div class="motion-card-header">What this workshop delivers</div>
+          <div class="motion-card-body">In 2 hours, participants build a production-grade agent end-to-end using vibe coding on Databricks. They leave with a working app, before-and-after eval scores, and a mental model of the full agent lifecycle. SAs leave with a qualified use case and an active POC.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 3 — Field Motion Fit -->
+    <div class="slide" id="slide-3">
+      <div class="slide-title">Where This Lives in the Field Motion</div>
+      <div class="module-rows">
+        <div class="module-row">
+          <div class="module-name">Module 1 &mdash; Agent Bricks</div>
+          <div class="module-desc">Use case exploration</div>
+          <div class="module-stage">U1/U2</div>
+        </div>
+        <div class="module-row highlighted">
+          <div class="module-name">Module 2 &mdash; Vibe Coding Workshop &larr; THIS ONE</div>
+          <div class="module-desc">Build and evaluate an agent</div>
+          <div class="module-stage">U2/U3</div>
+        </div>
+        <div class="module-row">
+          <div class="module-name">Module 3 &mdash; LLM Judge Builder</div>
+          <div class="module-desc">Production evaluation framework</div>
+          <div class="module-stage">U4/U5/U6</div>
+        </div>
+      </div>
+      <div class="s3-caption">Standard delivery: ~2 hours, sample data. Hackathon mode: full day, customer data.</div>
+    </div>
+
+    <!-- Slide 4 — Tech Stack -->
+    <div class="slide" id="slide-4">
+      <div class="slide-title">What Gets Built</div>
+      <div class="slide-subtitle">Participants touch all of these &mdash; without writing raw code</div>
+      <div class="tech-grid">
+        <div class="tech-card">
+          <div class="tech-name">Databricks Apps</div>
+          <div class="tech-desc">Hosts the agent, provides the chat UI at the app URL</div>
+        </div>
+        <div class="tech-card">
+          <div class="tech-name">Unity Catalog Functions</div>
+          <div class="tech-desc">4 tools: product search, order status, product details, return policy</div>
+        </div>
+        <div class="tech-card">
+          <div class="tech-name">Vector Search</div>
+          <div class="tech-desc">Powers the product_lookup tool &mdash; semantic search over the product catalog</div>
+        </div>
+        <div class="tech-card">
+          <div class="tech-name">Lakebase</div>
+          <div class="tech-desc">Conversation memory, isolated per participant via Postgres schema</div>
+        </div>
+        <div class="tech-card">
+          <div class="tech-name">MLflow</div>
+          <div class="tech-desc">Traces, eval dataset, LLM judges, eval runs &mdash; the full agent ops lifecycle</div>
+        </div>
+        <div class="tech-card">
+          <div class="tech-name">Claude via Coda</div>
+          <div class="tech-desc">Describe intent, Claude executes</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 5 — Pre-Workshop Setup -->
+    <div class="slide" id="slide-5">
+      <div class="slide-title">Pre-Workshop Setup</div>
+      <div class="slide-subtitle">Run this 1 week before. Idempotent &mdash; safe to re-run.</div>
+      <div class="setup-steps">
+        <div class="setup-step">
+          <div class="setup-num">1</div>
+          <div class="setup-text">Ensure participants have Databricks workspace access and Coda installed</div>
+        </div>
+        <div class="setup-step">
+          <div class="setup-num">2</div>
+          <div class="setup-text">Clone the repo: <a href="https://github.com/rmosleydb/databricks-agentic-app-workshop">https://github.com/rmosleydb/databricks-agentic-app-workshop</a></div>
+        </div>
+        <div class="setup-step">
+          <div class="setup-num">3</div>
+          <div class="setup-text">Run workspace_setup.py &mdash; creates catalog, loads data, builds VS index, provisions Lakebase, writes setup-state.json (30&ndash;45 min cold; ~10 min warm)</div>
+        </div>
+        <div class="setup-step">
+          <div class="setup-num">4</div>
+          <div class="setup-text">Run user_setup.py per participant &mdash; or they self-onboard via Claude during the session</div>
+        </div>
+        <div class="setup-step">
+          <div class="setup-num">5</div>
+          <div class="setup-text">Deploy reference/agent/ with <code style="font-family:monospace;color:var(--muted);">databricks bundle deploy</code> &mdash; gives you a fallback app URL</div>
+        </div>
+        <div class="setup-step">
+          <div class="setup-num">6</div>
+          <div class="setup-text">Pre-flight: open the reference app, ask about a product, confirm it responds</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 6 — Session Arc -->
+    <div class="slide" id="slide-6">
+      <div class="slide-title">What Happens in the Room</div>
+      <div class="session-table">
+        <div class="table-header">
+          <div class="th">Phase</div>
+          <div class="th">Duration</div>
+          <div class="th">What happens</div>
+        </div>
+        <div class="table-row">
+          <div class="td phase">Intro</div>
+          <div class="td duration">10 min</div>
+          <div class="td">Frame the lifecycle. Participants open Coda and clone the repo.</div>
+        </div>
+        <div class="table-row">
+          <div class="td phase">Step 1: Explore</div>
+          <div class="td duration">15 min</div>
+          <div class="td">Browse Unity Catalog. Understand the data model.</div>
+        </div>
+        <div class="table-row support-row">
+          <div class="td phase">Step 2: Build<span class="support-tag">most support</span></div>
+          <div class="td duration">25 min</div>
+          <div class="td">Create 4 UC Functions + deploy agent. Most hands-on help needed here.</div>
+        </div>
+        <div class="table-row">
+          <div class="td phase">Break</div>
+          <div class="td duration">5 min</div>
+          <div class="td">&mdash;</div>
+        </div>
+        <div class="table-row">
+          <div class="td phase">Step 3: Break</div>
+          <div class="td duration">15 min</div>
+          <div class="td">Chat with the agent. Discover quality issues.</div>
+        </div>
+        <div class="table-row support-row">
+          <div class="td phase">Step 4: Evaluate<span class="support-tag">most support</span></div>
+          <div class="td duration">30 min</div>
+          <div class="td">Generate traces &rarr; curate dataset &rarr; build judges &rarr; run eval. Most complexity here.</div>
+        </div>
+        <div class="table-row">
+          <div class="td phase">Step 5: Fix + Prove</div>
+          <div class="td duration">20 min</div>
+          <div class="td">Add guardrails, redeploy, re-run eval, compare scores.</div>
+        </div>
+        <div class="table-row">
+          <div class="td phase">Wrap-up</div>
+          <div class="td duration">10 min</div>
+          <div class="td">Share results, debrief, capture use cases.</div>
+        </div>
+      </div>
+      <div class="s6-caption">Total ~2 hrs. Steps 2 and 4 are where people need the most support.</div>
+    </div>
+
+    <!-- Slide 7 — Facilitating Step 2 -->
+    <div class="slide" id="slide-7">
+      <div class="slide-title">Step 2 &mdash; Build</div>
+      <div class="slide-subtitle">Your job: unblock, not instruct.</div>
+      <div class="two-cols">
+        <div class="blockers-col">
+          <div class="blockers-header">Common blockers</div>
+          <div class="blocker-item">UC Function creation fails &rarr; tell Claude: &ldquo;What permission error do you see? Fix it.&rdquo;</div>
+          <div class="blocker-item">App deploys but chat UI doesn&rsquo;t load &rarr; &ldquo;Check the app logs.&rdquo;</div>
+          <div class="blocker-item">Lakebase not connecting &rarr; &ldquo;Check the LAKEBASE_SCHEMA env var in app.yaml.&rdquo;</div>
+          <div class="blocker-item">Participant writing raw code &rarr; &ldquo;Describe what you want to Claude instead.&rdquo;</div>
+        </div>
+        <div class="fallback-card">
+          <div class="fallback-header">Fallback</div>
+          <div class="fallback-body">If a participant can&rsquo;t get their app running by end of Step 2, share the reference app URL you deployed in setup. They continue Steps 3&ndash;5 on the reference app &mdash; same eval experience, nothing lost.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 8 — Facilitating Step 4 -->
+    <div class="slide" id="slide-8">
+      <div class="slide-title">Step 4 &mdash; Evaluate</div>
+      <div class="slide-subtitle">Guide participants through each sub-step. Do not let Claude run this silently.</div>
+      <div class="substeps">
+        <div class="substep">
+          <div class="substep-num">4a</div>
+          <div class="substep-content">
+            <div class="substep-name">Generate traces</div>
+            <div class="substep-desc">20 scripted conversations &rarr; MLflow experiment. Watch, then open Experiments UI.</div>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">4b</div>
+          <div class="substep-content">
+            <div class="substep-name">Curate eval dataset</div>
+            <div class="substep-desc">Tell Claude to build a labeled dataset from traces. Review in MLflow UI.</div>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">4c</div>
+          <div class="substep-content">
+            <div class="substep-name">Build LLM judges</div>
+            <div class="substep-desc">Participants describe quality issues from Step 3. Claude writes 3&ndash;4 Guidelines scorers.</div>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">4d</div>
+          <div class="substep-content">
+            <div class="substep-name">Run eval</div>
+            <div class="substep-desc">Tell Claude: run <code style="font-family:monospace;font-size:16px;color:var(--muted);">mlflow.genai.evaluate()</code>. First run = baseline scores.</div>
+          </div>
+        </div>
+      </div>
+      <div class="s8-note">mlflow.genai.evaluate() requires mlflow&gt;=2.19.0. Check before the session.</div>
+    </div>
+
+    <!-- Slide 9 — What Good Looks Like -->
+    <div class="slide" id="slide-9">
+      <div class="slide-title">What a Successful Session Looks Like</div>
+      <div class="good-cols">
+        <div class="good-col">
+          <div class="good-col-header">Participants leave with</div>
+          <div class="good-bullet">Working agent app in their workspace</div>
+          <div class="good-bullet">MLflow experiment with traces and eval scores</div>
+          <div class="good-bullet">Before-and-after score comparison</div>
+          <div class="good-bullet">Mental model: build &rarr; trace &rarr; label &rarr; judge &rarr; fix &rarr; prove</div>
+        </div>
+        <div class="good-col">
+          <div class="good-col-header">You leave with</div>
+          <div class="good-bullet">1&ndash;2 qualified use cases</div>
+          <div class="good-bullet">App URL + eval scores to reference in follow-up</div>
+          <div class="good-bullet">POC status = Active in Salesforce</div>
+          <div class="good-bullet">Clear next step: custom scenario, hackathon, or LLM Judge Builder</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 10 — Customization -->
+    <div class="slide" id="slide-10">
+      <div class="slide-title">Running with Customer Data</div>
+      <div class="slide-subtitle">Upgrade to Hackathon mode for a full-day engagement</div>
+      <div class="custom-cols">
+        <div class="custom-col">
+          <div class="custom-col-header">What changes</div>
+          <div class="custom-item">SA maps customer data to the 4 UC Function slots</div>
+          <div class="custom-item">Source data swapped as CSVs &mdash; no PII</div>
+          <div class="custom-item">CLAUDE.md story rewritten for customer&rsquo;s domain</div>
+          <div class="custom-item">Eval judges reference customer&rsquo;s actual policies</div>
+        </div>
+        <div class="custom-col">
+          <div class="custom-col-header">What stays the same</div>
+          <div class="custom-item">The 5-step arc</div>
+          <div class="custom-item">Coda + Claude as the interface</div>
+          <div class="custom-item">Databricks Apps, Lakebase, MLflow &mdash; same stack</div>
+          <div class="custom-item">Workshop repo structure &mdash; just a new scenario folder</div>
+        </div>
+      </div>
+      <div class="s10-caption">See ADDING_A_SCENARIO.md in the repo for the full authoring checklist.</div>
+    </div>
+
+    <!-- Slide 11 — Resources -->
+    <div class="slide" id="slide-11">
+      <div class="slide-title">Resources</div>
+      <div class="resources-list">
+        <div class="resource-item">
+          <div class="resource-label">Workshop repo</div>
+          <div class="resource-value"><a href="https://github.com/rmosleydb/databricks-agentic-app-workshop">https://github.com/rmosleydb/databricks-agentic-app-workshop</a></div>
+        </div>
+        <div class="resource-item">
+          <div class="resource-label">Workshop guide</div>
+          <div class="resource-value"><a href="https://docs.google.com/document/d/1eFtU9o973hTLh8vfmtMm3yTX78ozKpU2Y2p010a282k/edit">https://docs.google.com/document/d/1eFtU9o973hTLh8vfmtMm3yTX78ozKpU2Y2p010a282k/edit</a></div>
+        </div>
+        <div class="resource-item">
+          <div class="resource-label">Coda installation</div>
+          <div class="resource-value"><a href="https://github.com/datasciencemonkey/coding-agents-databricks-apps">https://github.com/datasciencemonkey/coding-agents-databricks-apps</a></div>
+        </div>
+        <div class="resource-item">
+          <div class="resource-label">AI Hands-On Module Playbook</div>
+          <div class="resource-value"><a href="https://docs.google.com/presentation/d/1k1k57yy5bRYo9WAWKIgMhcKlekjueIoNJZEiBk2YR2g">https://docs.google.com/presentation/d/1k1k57yy5bRYo9WAWKIgMhcKlekjueIoNJZEiBk2YR2g</a></div>
+        </div>
+        <div class="resource-item">
+          <div class="resource-label">Custom scenario guide</div>
+          <div class="resource-value">ADDING_A_SCENARIO.md in the workshop repo</div>
+        </div>
+        <div class="resource-item">
+          <div class="resource-label">Questions</div>
+          <div class="resource-value">Robert Mosley, Kat Wong, Stewart Sherpa &mdash; AI Specialist team</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /deck -->
+</div><!-- /stage -->
+
+<div id="nav-prev"></div>
+<div id="nav-next"></div>
+<div id="counter"></div>
+
+<script>
+  const STORAGE_KEY = 'ambassador-enablement-slide';
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = parseInt(localStorage.getItem(STORAGE_KEY) || '0', 10);
+  if (current < 0 || current >= total) current = 0;
+
+  function show(idx) {
+    slides.forEach((s, i) => s.classList.toggle('active', i === idx));
+    current = idx;
+    localStorage.setItem(STORAGE_KEY, idx);
+    document.getElementById('counter').textContent = (idx + 1) + ' / ' + total;
+  }
+
+  function next() { if (current < total - 1) show(current + 1); }
+  function prev() { if (current > 0) show(current - 1); }
+
+  document.getElementById('nav-next').addEventListener('click', next);
+  document.getElementById('nav-prev').addEventListener('click', prev);
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next();
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   prev();
+  });
+
+  function scale() {
+    const deck = document.getElementById('deck');
+    const sw = window.innerWidth;
+    const sh = window.innerHeight;
+    const s = Math.min(sw / 1920, sh / 1080);
+    deck.style.transform = 'scale(' + s + ')';
+    deck.style.marginLeft = ((sw - 1920 * s) / 2) + 'px';
+    deck.style.marginTop  = ((sh - 1080 * s) / 2) + 'px';
+  }
+
+  window.addEventListener('resize', scale);
+  scale();
+  show(current);
+</script>
+</body>
+</html>

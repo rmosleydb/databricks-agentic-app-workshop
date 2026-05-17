@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic Apps — BU Lead Summary</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0B2026;
+    --accent: #FF3621;
+    --surface: #112830;
+    --white: #FFFFFF;
+    --muted: #8AABAF;
+    --font: 'Inter', sans-serif;
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+    font-family: var(--font);
+  }
+
+  #stage {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #deck {
+    width: 1920px;
+    height: 1080px;
+    position: relative;
+    transform-origin: top left;
+  }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    width: 1920px;
+    height: 1080px;
+    background: var(--bg);
+    display: none;
+  }
+
+  .slide.active { display: flex; flex-direction: column; }
+
+  #nav-prev, #nav-next {
+    position: fixed;
+    top: 0;
+    height: 100%;
+    cursor: pointer;
+    z-index: 100;
+  }
+  #nav-prev { left: 0; width: 33.333%; }
+  #nav-next { right: 0; width: 66.667%; }
+
+  #counter {
+    position: fixed;
+    bottom: 24px;
+    right: 32px;
+    color: var(--white);
+    font-family: var(--font);
+    font-size: 18px;
+    font-weight: 500;
+    opacity: 0.5;
+    z-index: 200;
+    pointer-events: none;
+  }
+
+  /* ── Slide 1 ── */
+  #slide-1 {
+    padding: 0 0 0 0;
+  }
+
+  .s1-top-rule {
+    width: 100%;
+    height: 4px;
+    background: var(--accent);
+    flex-shrink: 0;
+  }
+
+  .s1-header {
+    padding: 32px 100px 0;
+    flex-shrink: 0;
+  }
+
+  .s1-label {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  .s1-title {
+    font-size: 56px;
+    font-weight: 700;
+    color: var(--white);
+    line-height: 1.1;
+    margin-bottom: 8px;
+  }
+
+  .s1-subtitle {
+    font-size: 24px;
+    font-weight: 400;
+    color: var(--muted);
+    margin-bottom: 28px;
+  }
+
+  .cards-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 20px;
+    flex: 1;
+    padding: 0 100px 0;
+    min-height: 0;
+  }
+
+  .summary-card {
+    background: var(--surface);
+    padding: 32px 36px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: hidden;
+  }
+
+  .card-header {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+
+  .card-body {
+    font-size: 15px;
+    font-weight: 400;
+    color: var(--white);
+    line-height: 1.65;
+    flex: 1;
+  }
+
+  .s1-footer-bar {
+    padding: 16px 100px;
+    flex-shrink: 0;
+  }
+
+  .s1-footer-text {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--muted);
+  }
+
+  .s1-footer-text a {
+    color: var(--muted);
+    text-decoration: none;
+  }
+
+  /* ── Slide 2 ── */
+  #slide-2 {
+    background: #0F2A32;
+    padding: 80px 100px;
+  }
+
+  .s2-title {
+    font-size: 64px;
+    font-weight: 700;
+    color: var(--white);
+    margin-bottom: 60px;
+  }
+
+  .bullets-list {
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+    flex: 1;
+  }
+
+  .bullet-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+  }
+
+  .bullet-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-top: 10px;
+    flex-shrink: 0;
+  }
+
+  .bullet-text {
+    font-size: 22px;
+    font-weight: 400;
+    color: var(--white);
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div id="deck">
+
+    <!-- Slide 1 — Program Summary -->
+    <div class="slide active" id="slide-1">
+      <div class="s1-top-rule"></div>
+      <div class="s1-header">
+        <div class="s1-label">Internal &middot; FY27 Field Motion</div>
+        <div class="s1-title">Agentic Apps &mdash; Vibe Coding Workshop</div>
+        <div class="s1-subtitle">Program Summary for BU Leads</div>
+      </div>
+      <div class="cards-grid">
+        <div class="summary-card">
+          <div class="card-header">The Play</div>
+          <div class="card-body">A hands-on 2-hour lab where a customer technical team builds a production-grade AI agent end-to-end on Databricks. Participants use vibe coding (Claude + Coda) to build, deploy, evaluate, and harden an agent &mdash; touching Apps, Lakebase, and MLflow evals in one session. No setup required from the customer: SA runs workspace prep in advance.</div>
+        </div>
+        <div class="summary-card">
+          <div class="card-header">Why It Matters for Your Team</div>
+          <div class="card-body">Moves deals from scoping to active POC. Customers leave with a working app in their own workspace, quantified eval scores, and a clear hardening path. Drives Apps + Lakebase + Model Serving co-adoption in a single motion. Sets POC status to Active in Salesforce.</div>
+        </div>
+        <div class="summary-card">
+          <div class="card-header">What Your Team Needs to Do</div>
+          <div class="card-body">AE: identify accounts in U2/U3 with a defined AI use case and a technical team available for a half-day session. File ASQ &mdash; Overlay SA option. SA/DSA: run workspace setup 1 week ahead, deliver the lab, capture use cases and eval scores as leave-behinds.</div>
+        </div>
+        <div class="summary-card">
+          <div class="card-header">Targets and Success Signals</div>
+          <div class="card-body">75 sessions / 150 apps built (FY27 field target). Leading indicators: Apps created, Lakebase instances provisioned, MLflow eval runs. Trailing: AI DBU consumption lift 60 days post-session, POC-to-close rate. File ASQ for every delivery.</div>
+        </div>
+      </div>
+      <div class="s1-footer-bar">
+        <div class="s1-footer-text">Workshop repo: <a href="https://github.com/rmosleydb/databricks-agentic-app-workshop">https://github.com/rmosleydb/databricks-agentic-app-workshop</a> &middot; go/agenticapps</div>
+      </div>
+    </div>
+
+    <!-- Slide 2 — Notes for BU Leads -->
+    <div class="slide" id="slide-2">
+      <div class="s2-title">Notes for BU Leads</div>
+      <div class="bullets-list">
+        <div class="bullet-item">
+          <div class="bullet-dot"></div>
+          <div class="bullet-text">This deck is the internal summary for BU and BU+1 leads &mdash; not customer-facing</div>
+        </div>
+        <div class="bullet-item">
+          <div class="bullet-dot"></div>
+          <div class="bullet-text">Pair with the Agentic Apps L100 for full program context</div>
+        </div>
+        <div class="bullet-item">
+          <div class="bullet-dot"></div>
+          <div class="bullet-text">The exec summary slide covers program-level metrics; this deck is specific to the Vibe Coding lab motion</div>
+        </div>
+        <div class="bullet-item">
+          <div class="bullet-dot"></div>
+          <div class="bullet-text">Questions: contact Robert Mosley or the AI Specialist team</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /deck -->
+</div><!-- /stage -->
+
+<div id="nav-prev"></div>
+<div id="nav-next"></div>
+<div id="counter"></div>
+
+<script>
+  const STORAGE_KEY = 'bu-lead-summary-slide';
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = parseInt(localStorage.getItem(STORAGE_KEY) || '0', 10);
+  if (current < 0 || current >= total) current = 0;
+
+  function show(idx) {
+    slides.forEach((s, i) => s.classList.toggle('active', i === idx));
+    current = idx;
+    localStorage.setItem(STORAGE_KEY, idx);
+    document.getElementById('counter').textContent = (idx + 1) + ' / ' + total;
+  }
+
+  function next() { if (current < total - 1) show(current + 1); }
+  function prev() { if (current > 0) show(current - 1); }
+
+  document.getElementById('nav-next').addEventListener('click', next);
+  document.getElementById('nav-prev').addEventListener('click', prev);
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next();
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   prev();
+  });
+
+  function scale() {
+    const deck = document.getElementById('deck');
+    const sw = window.innerWidth;
+    const sh = window.innerHeight;
+    const s = Math.min(sw / 1920, sh / 1080);
+    deck.style.transform = 'scale(' + s + ')';
+    deck.style.marginLeft = ((sw - 1920 * s) / 2) + 'px';
+    deck.style.marginTop  = ((sh - 1080 * s) / 2) + 'px';
+  }
+
+  window.addEventListener('resize', scale);
+  scale();
+  show(current);
+</script>
+</body>
+</html>
